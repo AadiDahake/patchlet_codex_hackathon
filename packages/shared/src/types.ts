@@ -171,9 +171,9 @@ export type EscalationStatus =
  * What builds the change.
  *
  * `local` is the worker's own runner: it files the issue, drafts the diff and opens the pull
- * request in one process. `forge` is the Reflex/Runloop engine, which builds and verifies the
- * capability inside isolated sandboxes. `forge` is a named seam only: nothing implements it yet,
- * and selecting it is refused at the API boundary rather than accepted and dropped.
+ * request in one process. `forge` is the sandbox engine in `apps/web/lib/forge`: Codex personas
+ * build and verify a compiled capability inside isolated sandboxes, and the winner opens the
+ * draft pull request.
  */
 export type EscalationEngine = "local" | "forge";
 
