@@ -1,0 +1,29 @@
+{
+  "name": "patchlet",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @patchlet/web",
+    "build": "npm run build --workspace @patchlet/widget && npm run build --workspace @patchlet/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:seed": "node scripts/seed.mjs",
+    "demo:reset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/reset-demo.mjs"
+  },
+  "devDependencies": {
+    "pg": "^8.13.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
