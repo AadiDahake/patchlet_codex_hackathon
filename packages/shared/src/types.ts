@@ -182,7 +182,8 @@ export type TraceEvent = {
   projectId: string;
   conversationId: string | null;
   escalationId: string | null;
-  source: "agent" | "workflow";
+  /** `forge` is the sandbox engine's lane, so the console can colour it apart from the chat. */
+  source: "agent" | "workflow" | "forge";
   kind:
     | "probe"
     | "verdict"
@@ -192,7 +193,13 @@ export type TraceEvent = {
     | "artifact"
     | "pause"
     | "status"
-    | "error";
+    | "error"
+    /** A capability the compiler discovered; detail carries the granularity decision. */
+    | "capability"
+    /** One candidate implementation in one sandbox: provisioning, building, or its test result. */
+    | "candidate"
+    /** A live sandbox preview; detail carries the URL and the candidate. */
+    | "preview";
   status: "running" | "ok" | "failed";
   title: string;
   detail: unknown;
