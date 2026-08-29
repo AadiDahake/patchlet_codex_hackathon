@@ -1,5 +1,7 @@
 # Patchlet
 
+[![CI](https://github.com/AadiDahake/patchlet_codex_hackathon/actions/workflows/ci.yml/badge.svg)](https://github.com/AadiDahake/patchlet_codex_hackathon/actions/workflows/ci.yml)
+
 **Patchlet turns repeated customer workarounds into verified product PRs.**
 
 Patchlet is a support agent a company embeds in the corner of its own web app. Three things make it
