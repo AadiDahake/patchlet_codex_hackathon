@@ -17,7 +17,16 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compile, NOVAAIR_CONTEXT, type CompilerEvent, type ModelClient, type Trajectory } from "@patchlet/capability";
+import {
+  compile,
+  NOVAAIR_CONTEXT,
+  STAGES,
+  STAGE_ORDER,
+  type CompilerEvent,
+  type CompilerStage,
+  type ModelClient,
+  type Trajectory,
+} from "@patchlet/capability";
 import { FakeModelClient } from "@patchlet/capability/fake-model";
 import { CodexModelClient } from "./lib/codex-model";
 
@@ -45,17 +54,25 @@ function clock(iso: string): string {
   return new Date(iso).toISOString().slice(11, 19);
 }
 
+let currentStage: CompilerStage | null = null;
+
+/** One header per story stage, with the research that powers it, then its events indented. */
 function printEvent(e: CompilerEvent): void {
-  const stage = e.stage.padEnd(13);
-  const line = `${dim(clock(e.at))} ${accent(stage)} ${e.title}`;
-  console.log(line);
-  if (e.stage === "decision" || e.stage === "naming" || (e.stage === "granularity" && "chosen" in e.detail)) {
-    const detail = { ...e.detail };
-    if ("chosen" in detail) delete detail.chosen;
-    for (const [k, v] of Object.entries(detail)) {
-      const text = typeof v === "string" ? v : JSON.stringify(v);
-      console.log(`${" ".repeat(23)}${dim(`${k}: ${text.length > 160 ? `${text.slice(0, 157)}...` : text}`)}`);
-    }
+  if (e.stage !== currentStage) {
+    currentStage = e.stage;
+    const n = STAGE_ORDER.indexOf(e.stage) + 1;
+    const label = `${n}. ${STAGES[e.stage].title}`;
+    console.log(`\n${accent(label.padEnd(28, " "))} ${dim(STAGES[e.stage].powered_by)}`);
+  }
+  console.log(`   ${dim(clock(e.at))}  ${e.title}`);
+  const detailed = e.title.startsWith("Chosen:") || e.title.startsWith("Named:") || e.title.startsWith("No capability") || e.title.startsWith("Capability specification");
+  if (!detailed) return;
+  const detail = { ...e.detail };
+  delete detail.chosen;
+  delete detail.rejected;
+  for (const [k, v] of Object.entries(detail)) {
+    const text = typeof v === "string" ? v : JSON.stringify(v);
+    console.log(`             ${dim(`${k}: ${text.length > 150 ? `${text.slice(0, 147)}...` : text}`)}`);
   }
 }
 
@@ -105,7 +122,7 @@ async function main(): Promise<void> {
     onEvent: printEvent,
     concurrency: Number(value("concurrency") ?? 3),
   });
-  console.log(`\n${dim(`${result.events.length} events in ${((Date.now() - started) / 1000).toFixed(1)}s`)}`);
+  console.log(`\n${dim(`${result.events.length} events in ${((Date.now() - started) / 1000).toFixed(1)}s, model ${model.name}`)}`);
 
   if (result.decision === "none") {
     console.log(`\n${bold("decision: none")}`);
