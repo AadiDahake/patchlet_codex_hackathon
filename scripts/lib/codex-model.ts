@@ -63,12 +63,14 @@ export class CodexModelClient implements ModelClient {
     ];
     const started = Date.now();
     const { code, stdout, stderr } = await run(this.options.bin ?? "codex", args, `SYSTEM\n${prompt.system}\n\nUSER\n${prompt.user}\n`);
-    const tokens = /tokens used\n([\d,]+)/.exec(stdout)?.[1];
+    // Codex writes its header and the token count to stderr when stdout is not a terminal.
+    const log = `${stdout}\n${stderr}`;
+    const tokens = /tokens used\s*\n\s*([\d,]+)/.exec(log)?.[1];
     this.options.onCall?.({
       purpose: prompt.purpose,
       duration_ms: Date.now() - started,
       tokens: tokens ? Number(tokens.replace(/,/g, "")) : null,
-      model: /^model: (.+)$/m.exec(stdout)?.[1] ?? null,
+      model: /^model: (.+?)\s*$/m.exec(log)?.[1] ?? null,
       exit: code,
     });
     if (code !== 0) {
