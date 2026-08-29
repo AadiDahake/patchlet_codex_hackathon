@@ -140,6 +140,52 @@ create table trace_event (
   created_at timestamptz not null default now()
 );
 
+-- One Codex attempt in one sandbox of a forge run (migration 0014). The handles (devbox id, tunnel
+-- key, local path, port) are stored, never a preview URL: a URL is only valid while the box runs
+-- and is rebuilt on every read. capability_spec_id has no foreign key until migration 0013's
+-- capability_spec table exists; a follow-up adds it.
+create table candidate (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  escalation_id uuid not null references escalation on delete cascade,
+  capability_spec_id uuid,                 -- null when the run was started from an inline spec
+  label text not null,                     -- 'A' | 'B'
+  persona text not null default 'capability_builder',  -- the persona at work, or last at work
+  strategy text not null default 'runloop',            -- reflex | runloop | local
+  devbox_id text, blueprint_name text, tunnel_key text,
+  local_path text, preview_port int,
+  status text not null default 'queued',   -- queued | provisioning | building | testing | ready | failed | torn_down
+  codex_thread_id text, codex_exit_code int,
+  branch text,
+  scenarios_passed int, scenarios_total int,
+  failing_scenarios jsonb,                 -- [scenario id]
+  test_report jsonb,                       -- {verifier, runner, problem, test_exit_code}
+  changed_files jsonb,                     -- [{path, kind}] from Codex file_change items
+  error text,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  torn_down_at timestamptz
+);
+
+-- What happened to a capability after a person merged it (migration 0014). Future data is seeded
+-- and the default source says so.
+create table deployment_outcome (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  group_id uuid not null references feature_request_group on delete cascade,
+  measured_at timestamptz not null default now(),
+  window_days int not null default 30,
+  eligible_users int, feature_used int, feature_succeeded int,
+  median_actions_before real, median_actions_after real,
+  support_change_pct real,
+  source text not null default 'seeded',   -- seeded | posthog
+  created_at timestamptz not null default now()
+);
+
+-- Migration 0014 also adds to escalation:
+--   capability_spec_id uuid            -- the compiled specification the run built (no FK yet)
+--   winning_candidate_id uuid references candidate on delete set null
+
 -- What the agent remembers about one anonymous visitor (migration 0006). Nothing sensitive is
 -- stored here: no emails, phone numbers, keys or passwords.
 create table visitor_memory (
@@ -292,8 +338,8 @@ export type EscalationStatus =
   | "queued" | "filing" | "filed" | "inspecting" | "drafting" | "pr_open" | "awaiting_approval"
   | "approved" | "rejected" | "merging" | "deploying" | "shipped" | "updated" | "failed";
 
-// What builds the change. `local` is the worker's own runner; `forge` is the Reflex/Runloop engine,
-// a named seam that is refused at the API boundary until it exists.
+// What builds the change. `local` is the worker's own runner; `forge` is the sandbox engine in
+// apps/web/lib/forge (see docs/forge.md).
 export type EscalationEngine = "local" | "forge";
 
 export type TraceEvent = {
@@ -351,7 +397,10 @@ one account can never read another's sources, conversations, escalations or trac
 | `GET /api/conversations/:id` | - | `{conversation}`: every message in order with its steps, probes, verdict and feature request, the escalation, and `memory: string[]`, the facts the agent keeps about that visitor |
 | `GET /api/escalations` | - | `{escalations: Escalation[]}`, newest first |
 | `GET /api/requests` | - | `{requests: RequestGroup[]}`, heaviest first: priority, then last reported |
-| `POST /api/escalations/:id/approve` | `{approved: boolean, note?: string}` | `{ok: true, status}` |
+| `POST /api/escalations/:id/approve` | `{approved: boolean, note?: string}` | `{ok: true, status}`; under `forge` the route then marks the pull request ready, merges it, watches the deployment and tears the winner's sandbox down after it answers |
+| `POST /api/opportunities/:groupId/forge` | `{spec?: CapabilityIr}`; without `spec` the group's latest `capability_spec` row is used | `202 {escalationId, status: "drafting"}`; `409 {error, reason: "no_capability_spec" \| "no_github_token"}`; `503 {error, reason: "engine_unavailable"}` when the selected strategy has no keys; `400 {error, reason: "invalid_spec"}` |
+| `GET /api/forge/:escalationId` | - | `{escalation: {id, engine, status, prUrl, prNumber, branch, deploymentUrl, winningCandidateId, capabilitySpecId, approval, error, createdAt, updatedAt}, candidates: Candidate[]}` (the `candidate` row, camel-cased) |
+| `GET /api/forge/:escalationId/preview` | - | `{url: string \| null, candidate: "A" \| "B" \| null}`; the URL is rebuilt from the winner's handle and health-checked on every read, `null` once the sandbox is gone |
 | `GET /api/trace/stream` | `?since=&conversationId=&escalationId=` | SSE; `id:` is the `trace_event.id`, `event: trace`, `data: TraceEvent` |
 | `GET /api/trace` | same filters, `?since=&limit=` | `{events: TraceEvent[]}` backfill |
 | `POST /api/auth/signup` | `{email, password, company}` | creates the account already confirmed through the Supabase admin API; the browser then signs in with the password |
@@ -361,8 +410,9 @@ one account can never read another's sources, conversations, escalations or trac
 | `GET /api/health` | - | `{ok, db, openai}` |
 
 `POST /api/escalate` answers `503 {error, reason: "engine_unavailable"}` and writes nothing when
-`ESCALATION_ENGINE` is not an engine that can run: `forge` is a named seam and nothing implements it
-yet.
+`ESCALATION_ENGINE` names an engine that cannot run: `forge` without the keys of its selected
+strategy. Under a runnable `forge` the row is inserted `queued` and adopted by the next
+`POST /api/opportunities/:groupId/forge` for its group.
 
 `POST /api/escalations/:id/approve` writes `approval` on the row and sets the status to `approved`
 or `rejected`. The run is polling that column, so that is the whole channel.
@@ -382,9 +432,12 @@ The console renders these specially and falls back to a key/value list for anyth
 | `model` | `{model, purpose, input_summary?, output_summary?, files?: [{path, reason}]}` |
 | `pause` | `{label, taskId?}` |
 | `tool` | `{tool, transport: "mcp" \| "rest" \| "git" \| "shell", args_summary, result_summary}` |
+| `candidate` | `{candidate: "A" \| "B", strategy}` while provisioning and building; `{candidate, scenarios_passed, scenarios_total, failing: [scenario id], runner: {passed, failed, total, success} \| null, files_changed}` when scored |
+| `preview` | `{url, candidate, port, sandbox}` |
 | `capability` | one `CompilerEvent` from `@patchlet/capability`: `{stage, title, detail, at}`; the `Chosen:` event's detail carries `rejected_too_low`, `rejected_too_high` and `coverage` |
-| `candidate` | `{label: "A" \| "B", persona, status, scenarios_passed?, scenarios_total?, failing?: string[]}` |
-| `preview` | `{url, candidate}` |
+
+Forge rows carry `source: "forge"`; the persona's `tool`, `artifact` and `model` rows are titled
+`<Persona> (<candidate>): ...`, and a `file_change` artifact is `{artifact: "file_change", files: [{path, kind}]}`.
 
 ## 4. Agent behaviour
 
@@ -567,3 +620,14 @@ The compiler's entry point is `compile(trajectories, context, model)`, returning
 `events` is the decision trail, one `CompilerEvent` `{stage, title, detail, at}` per step under the
 four stages `workflows`, `intent`, `capability`, `verification`. How each field is derived, and how
 to run the compiler with no key, is in `docs/capability-compiler.md`.
+
+## 7. Environment
+
+Every variable is described in `.env.example` and read through `apps/web/lib/env.ts`. The forge
+engine's: `ESCALATION_ENGINE=forge` selects it; `FORGE_STRATEGY` (`reflex` | `runloop` | `local`,
+default by the keys present) selects where candidates build; `REFLEX_API_KEY`,
+`REFLEX_ORGANIZATION_ID`, `REFLEX_API_URL` and the three `REFLEX_PERSONA_*` ids for Reflex;
+`RUNLOOP_API_KEY` and the optional `RUNLOOP_BLUEPRINT` for Runloop devboxes (also the agent's
+devbox under Reflex); `FORGE_TARGET_REPO` (default `AadiDahake/novaair`) when the project has no
+repository bound; `FORGE_LOCAL_CACHE_DIR` for the local strategy's clone; `OPENAI_API_KEY` for
+Codex inside a devbox, optional locally where the saved Codex login is used.
