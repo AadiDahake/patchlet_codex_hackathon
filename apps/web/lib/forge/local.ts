@@ -340,8 +340,9 @@ class LocalSandbox implements Sandbox {
   async pushBranch(branch: string, message: string): Promise<{ sha: string }> {
     const identity = this.options.gitIdentity ?? DEFAULT_IDENTITY;
     const who = ["-c", `user.name=${identity.name}`, "-c", `user.email=${identity.email}`];
-    // The specification files are Patchlet's; they never travel with the change.
-    await git(this.repoDir, ["add", "-A", "--", ".", ":!.patchlet"]);
+    // The specification files are Patchlet's; they never travel with the change. The dependency
+    // tree is a symlink here, which a `node_modules/` ignore pattern does not cover.
+    await git(this.repoDir, ["add", "-A", "--", ".", ":!.patchlet", ":!node_modules"]);
     const staged = await run("git", ["diff", "--cached", "--quiet"], { cwd: this.repoDir });
     if (staged.exitCode !== 0) await git(this.repoDir, [...who, "commit", "--quiet", "-m", message]);
     const sha = await git(this.repoDir, ["rev-parse", "HEAD"]);

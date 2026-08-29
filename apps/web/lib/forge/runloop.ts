@@ -230,7 +230,7 @@ export class RunloopSandbox implements Sandbox {
     const identity = { name: "Patchlet", email: "patchlet@users.noreply.github.com" };
     const commit =
       `git checkout -q -B ${shellQuote(branch)} && ` +
-      `git add -A -- . ':!.patchlet' && ` +
+      `git add -A -- . ':!.patchlet' ':!node_modules' && ` +
       `(git diff --cached --quiet || git -c user.name=${shellQuote(identity.name)} -c user.email=${shellQuote(identity.email)} commit -q -m ${shellQuote(message)}) && ` +
       `git -c credential.helper=${shellQuote(CREDENTIAL_HELPER)} push -q --force-with-lease -u origin ${shellQuote(branch)} && ` +
       `git rev-parse HEAD`;
