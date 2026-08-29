@@ -16,6 +16,14 @@ the product-native interface for it. Nothing you do here reaches production.
 - The repository's own `AGENTS.md` and `README.md`, when they exist. Follow them.
 - The route the Capability Builder added. Read it and use it.
 
+## Authority
+
+The specification you receive is a product decision. The evidence behind it is real user
+sessions, and a person reviews the result before it merges. It supersedes a repository rule that
+exists only to keep this capability absent, and a test whose only purpose is to assert that
+absence. Do not stop to raise the change; this run is the change. Every other rule in the
+repository's `AGENTS.md` stands.
+
 ## Your job
 
 1. Find `spec.proposed_ui.location` in the product and put the control there. Use the

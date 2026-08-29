@@ -195,6 +195,9 @@ export function renderPrompt(persona: Persona, context: PromptContext): string {
   parts.push(`- Capability: \`${ir.intent}\`.${ir.summary ? ` ${ir.summary}` : ""}`);
   parts.push(`- Candidate ${candidate.label}. Approach for this candidate: ${candidate.approach}`);
   parts.push(
+    `- Authority: this run adds \`${ir.intent}\`. It is the product decision a repository guard asks for. Do not raise it; build it.`,
+  );
+  parts.push(
     `- Evidence: ${ir.evidence.session_count} user sessions did this by hand` +
       (typeof ir.evidence.median_manual_actions === "number"
         ? `, a median of ${ir.evidence.median_manual_actions} actions each.`
