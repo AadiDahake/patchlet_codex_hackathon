@@ -1,9 +1,9 @@
 /** Accepts the user's offer to report a missing feature and starts the run that builds it. */
 import { preflight, withCors } from "@/lib/cors";
-import { escalationEngine } from "@/lib/env";
 import { serviceClient } from "@/lib/supabase";
 import { emitTrace } from "@/lib/trace";
 import { reportRequest } from "@/lib/agent/requests";
+import { assertEngineAvailable } from "@/lib/agent/runner";
 import type { EscalateRequest, FeatureRequest } from "@patchlet/shared";
 
 export const runtime = "nodejs";
@@ -14,16 +14,14 @@ export function OPTIONS(): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  // Nothing is written until the engine that would carry the run actually exists. `forge` is a
-  // named seam waiting on the Reflex/Runloop build, so it is refused here rather than accepted
-  // and dropped into a queue nobody reads.
-  const engine = escalationEngine();
-  if (engine !== "local") {
+  // Nothing is written until the engine that would carry the run can actually run. A `forge`
+  // engine without its keys is refused here rather than accepted and dropped into a queue nobody
+  // reads.
+  try {
+    assertEngineAvailable();
+  } catch (error) {
     return withCors(
-      Response.json(
-        { error: `The ${engine} engine is not configured yet.`, reason: "engine_unavailable" },
-        { status: 503 },
-      ),
+      Response.json({ error: (error as Error).message, reason: "engine_unavailable" }, { status: 503 }),
     );
   }
 

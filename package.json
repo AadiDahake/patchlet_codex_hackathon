@@ -19,7 +19,9 @@
     "compile": "tsx scripts/compile.ts",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "node scripts/seed.mjs",
-    "demo:reset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/reset-demo.mjs"
+    "demo:reset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/reset-demo.mjs",
+    "forge:local": "tsx apps/web/scripts/forge-local.ts",
+    "forge:sweep": "tsx apps/web/scripts/forge-sweep.ts"
   },
   "devDependencies": {
     "pg": "^8.13.1",
