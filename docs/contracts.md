@@ -301,8 +301,12 @@ export type TraceEvent = {
   projectId: string;
   conversationId: string | null;
   escalationId: string | null;
-  source: "agent" | "workflow";
-  kind: "probe" | "verdict" | "decision" | "model" | "tool" | "artifact" | "pause" | "status" | "error";
+  source: "agent" | "workflow" | "forge";   // forge is the sandbox engine's lane
+  kind:
+    | "probe" | "verdict" | "decision" | "model" | "tool" | "artifact" | "pause" | "status" | "error"
+    | "capability"   // a capability the compiler discovered; detail carries the granularity decision
+    | "candidate"    // one candidate implementation in one sandbox, or its test result
+    | "preview";     // a live sandbox preview; detail carries the URL and the candidate
   status: "running" | "ok" | "failed";
   title: string;
   detail: unknown;
@@ -378,6 +382,9 @@ The console renders these specially and falls back to a key/value list for anyth
 | `model` | `{model, purpose, input_summary?, output_summary?, files?: [{path, reason}]}` |
 | `pause` | `{label, taskId?}` |
 | `tool` | `{tool, transport: "mcp" \| "rest" \| "git" \| "shell", args_summary, result_summary}` |
+| `capability` | one `CompilerEvent` from `@patchlet/capability`: `{stage, title, detail, at}`; the `Chosen:` event's detail carries `rejected_too_low`, `rejected_too_high` and `coverage` |
+| `candidate` | `{label: "A" \| "B", persona, status, scenarios_passed?, scenarios_total?, failing?: string[]}` |
+| `preview` | `{url, candidate}` |
 
 ## 4. Agent behaviour
 
@@ -511,3 +518,52 @@ Notes the API enforces:
   clamped into range on the way in.
 - Text to speech answers with chunked audio, so `POST /api/speak` yields each `audio/mpeg` chunk as
   it lands and playback starts before the utterance is complete.
+
+
+## 6. Capability IR
+
+`@patchlet/capability` compiles user workflows into one product capability. Its output is the
+Capability IR, validated against `packages/capability/src/capability-ir.schema.json`
+(`schema_version` "1") before anything stores it. The shape follows ASIL (arXiv 2608.26991): a
+structured observation, semantic actions with typed params, and a final-state validator.
+
+```ts
+type CapabilityIR = {
+  schema_version?: "1";
+  intent: string;                       // snake_case, a user goal, never a gesture: seat_party_together
+  summary?: string;
+  observation: {                        // ASIL structured observation, as a schema
+    inputs: Slot[];                     // what the caller passes
+    app_state: Slot[];                  // what is read from the product at call time
+    interactive_elements?: { type; id: Slot; attributes?: Slot[]; constraints?: string[]; available_actions?: string[] }[];
+    example?: Record<string, unknown>;
+  };
+  actions: {                            // ASIL semantic actions; each maps to a product primitive
+    name; kind: "read" | "write" | "rank";
+    action_type?: "set_value" | "invoke_function" | "modify_file" | "api_call" | "navigate" | "batch";
+    target?: string; params: Slot[]; returns?; primitive?: {symbol, file, confidence}; idempotent?;
+  }[];
+  constraints: { id; statement; source?: "trajectory" | "documentation" | "repository" | "policy" | "inferred"; evidence_ref? }[];
+  preferences?: { id; statement; direction: "minimize" | "maximize"; weight? }[];
+  success: {
+    final_state: { id; statement }[];   // ASIL final-state validator
+    scenarios: { id; given; when?; then; kind? }[];   // the Verifier's denominator, 21 for NovaAir
+  };
+  proposed_ui?: { location?; label?; affordance?; result_summary? };
+  evidence: {                           // everything here comes from the mined sessions
+    session_count; median_manual_actions?; window?: {from, to};
+    trajectories: { session_id; replay_url?; reward?: {completion, coherence, total}; steps: {t, event, props?}[] }[];
+  };
+  granularity?: { replaces_atomic_steps_median?; rejected_too_low?: string[]; rejected_too_high?: string[]; coverage? };
+  provenance?: { compiler_version?; model?; created_at?; opportunity_id? };
+};
+```
+
+`Slot` is `{name, type, description?, required?, enum?, range?}` with `type` one of `string`,
+`number`, `integer`, `boolean`, `string[]`, `number[]`, `object`, `object[]`.
+
+The compiler's entry point is `compile(trajectories, context, model)`, returning
+`{decision: "capability", ir, rejected, events}` or `{decision: "none", reasons, rejected, events}`.
+`events` is the decision trail, one `CompilerEvent` `{stage, title, detail, at}` per step under the
+four stages `workflows`, `intent`, `capability`, `verification`. How each field is derived, and how
+to run the compiler with no key, is in `docs/capability-compiler.md`.

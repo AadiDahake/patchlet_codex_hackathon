@@ -8,6 +8,7 @@ before changing anything that crosses a boundary.
 | Path | Owns |
 |---|---|
 | `packages/shared` | Types and pure helpers shared by the widget, the web app and the tests. Zero runtime dependencies. |
+| `packages/capability` | The capability compiler: user workflows in, a validated Capability IR out. Pure TypeScript; see "The capability compiler stays pure". |
 | `packages/widget` | The embeddable script. Builds to a single IIFE at `dist/patchlet.js`, copied into `apps/web/public/widget.js`. |
 | `apps/web` | The Next.js dashboard: landing page, console, and every HTTP route. |
 | `services/worker` | The Python escalation worker. Independent toolchain (`uv`), independent tests. |
@@ -53,6 +54,15 @@ its sources, conversations, escalations, trace and repository binding.
 Reflex/Runloop engine and is a named seam: `POST /api/escalate` answers `503` and writes nothing
 rather than queueing a row no runner will claim. Any engine added later follows the same rule -
 refuse before the first write, never after it.
+
+## The capability compiler stays pure
+
+`packages/capability` has one rule: no network, no database, no framework imports. It never
+imports Supabase, Next, the `openai` package or `fetch`. Trajectories go in, a validated IR comes
+out, and the model is an injected `ModelClient` interface that the caller supplies. That is what
+makes every test in the package run offline against `test/fixtures/sessions.json`, and what makes
+`npm run compile -- --fixtures` demonstrable with no key and no database. The four stages, the
+research each one credits, and the IR fields are in `docs/capability-compiler.md`.
 
 ## TypeScript
 
