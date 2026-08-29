@@ -117,6 +117,12 @@ describe("codexStream", () => {
     expect(stream.summary.changedFiles).toEqual([{ path: "a.ts", kind: "add" }]);
   });
 
+  it("makes file paths relative to the repository", () => {
+    const stream = codexStream(() => undefined, { repoDir: "/home/user/novaair" });
+    stream.push(JSON.stringify({ type: "item.completed", item: { id: "1", type: "file_change", status: "completed", changes: [{ path: "/home/user/novaair/lib/a.ts", kind: "add" }, { path: "lib/b.ts", kind: "update" }] } }));
+    expect(stream.summary.changedFiles).toEqual([{ path: "lib/a.ts", kind: "add" }, { path: "lib/b.ts", kind: "update" }]);
+  });
+
   it("records a failed turn", () => {
     const stream = codexStream(() => undefined);
     stream.push(JSON.stringify({ type: "turn.failed", error: { message: "context window exceeded" } }));

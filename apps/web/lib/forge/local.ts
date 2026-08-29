@@ -69,6 +69,18 @@ function splitLines(onLine: (line: string) => void): { push(chunk: Buffer): void
   };
 }
 
+/**
+ * The environment a child inherits. The launcher's own loader settings (`tsx --tsconfig` exports
+ * `TSX_TSCONFIG_PATH`, a `NODE_OPTIONS` that imports tsx) would be read by every `tsx` and `node`
+ * the target repository runs, and point them at files that do not exist there.
+ */
+export function childEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.TSX_TSCONFIG_PATH;
+  if (env.NODE_OPTIONS && /tsx/.test(env.NODE_OPTIONS)) delete env.NODE_OPTIONS;
+  return { ...env, ...extra };
+}
+
 /** Runs one program with arguments (no shell) and collects its output. */
 export function run(
   file: string,
@@ -78,7 +90,7 @@ export function run(
   return new Promise((resolvePromise, reject) => {
     const child = spawn(file, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...(options.env ?? {}) },
+      env: childEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -322,7 +334,7 @@ class LocalSandbox implements Sandbox {
     stopPreview(this.repoDir);
     const child = spawn("npm", ["run", "start", "--", "-p", String(port), "-H", "127.0.0.1"], {
       cwd: this.repoDir,
-      env: { ...process.env, PORT: String(port) },
+      env: childEnv({ PORT: String(port) }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout?.on("data", (chunk: Buffer) => this.options.log?.(`[preview ${this.candidate.label}] ${chunk.toString("utf8").trimEnd()}`));

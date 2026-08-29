@@ -114,10 +114,13 @@ async function runPersona(input: {
   const absolute = (path: string): string => `${sandbox.repoDir}/${path}`;
 
   const attempt = async (bypassSandbox: boolean): Promise<{ exitCode: number; summary: CodexRunSummary }> => {
-    const stream = codexStream((event) => {
-      const row = traceForEvent(event, { persona: persona.name, candidate: label });
-      if (row) input.trace.push(row);
-    });
+    const stream = codexStream(
+      (event) => {
+        const row = traceForEvent(event, { persona: persona.name, candidate: label });
+        if (row) input.trace.push(row);
+      },
+      { repoDir: sandbox.repoDir },
+    );
     const result = await sandbox.exec(
       codexCommand({
         repoDir: sandbox.repoDir,

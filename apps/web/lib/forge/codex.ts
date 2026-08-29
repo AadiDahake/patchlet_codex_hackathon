@@ -201,11 +201,22 @@ export function traceForEvent(
   return null;
 }
 
+/** `/home/user/novaair/lib/x.ts` -> `lib/x.ts`. Some CLI versions report absolute paths. */
+function relativeTo(repoDir: string | undefined, path: string): string {
+  if (!repoDir) return path;
+  const prefix = repoDir.endsWith("/") ? repoDir : `${repoDir}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
 /**
  * Feeds stdout lines one at a time and keeps the run's summary as they arrive. `onEvent` fires
  * for every parsed event, in order, so the caller can write trace rows while Codex still runs.
+ * File paths are made relative to `repoDir` before anyone sees them.
  */
-export function codexStream(onEvent: (event: ThreadEvent) => void): {
+export function codexStream(
+  onEvent: (event: ThreadEvent) => void,
+  options: { repoDir?: string } = {},
+): {
   push(line: string): void;
   readonly summary: CodexRunSummary;
 } {
@@ -228,6 +239,12 @@ export function codexStream(onEvent: (event: ThreadEvent) => void): {
       if (!event) {
         if (line.trim() !== "") summary.noise.push(line);
         return;
+      }
+      if (event.type.startsWith("item.") && "item" in event && event.item.type === "file_change") {
+        event.item.changes = event.item.changes.map((change) => ({
+          ...change,
+          path: relativeTo(options.repoDir, change.path),
+        }));
       }
       if (event.type === "thread.started") summary.threadId = event.thread_id;
       else if (event.type === "turn.completed") summary.usage = event.usage;
