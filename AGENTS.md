@@ -14,7 +14,7 @@ before changing anything that crosses a boundary.
 | `services/worker` | The Python escalation worker. Independent toolchain (`uv`), independent tests. |
 | `supabase/migrations` | Schema. Additive migrations only after the first release. |
 | `scripts` | Node maintenance scripts run through the root `package.json`. |
-| `docs` | The plan, architecture, contracts, demo notes, deploy notes. |
+| `docs` | The plan, architecture, contracts, the forge engine, demo notes, deploy notes. |
 
 `docs/PLAN.md` is what the product is for. Read it before changing anything a demo beat depends on.
 
@@ -51,7 +51,8 @@ its sources, conversations, escalations, trace and repository binding.
 ## An engine that cannot run refuses at the boundary
 
 `ESCALATION_ENGINE` names what builds the change. `local` is the worker's runner. `forge` is the
-Reflex/Runloop engine and is a named seam: `POST /api/escalate` answers `503` and writes nothing
+sandbox engine in `apps/web/lib/forge` (`docs/forge.md`): `forgeAvailability()` checks the selected
+strategy's keys, and `POST /api/escalate` answers `503` and writes nothing when they are missing
 rather than queueing a row no runner will claim. Any engine added later follows the same rule -
 refuse before the first write, never after it.
 
@@ -63,6 +64,18 @@ out, and the model is an injected `ModelClient` interface that the caller suppli
 makes every test in the package run offline against `test/fixtures/sessions.json`, and what makes
 `npm run compile -- --fixtures` demonstrable with no key and no database. The four stages, the
 research each one credits, and the IR fields are in `docs/capability-compiler.md`.
+
+## The forge engine
+
+`apps/web/lib/forge` is the only place that knows Reflex and Runloop exist. The engine
+(`engine.ts`) takes explicit dependencies: a `SandboxStrategy` (`reflex.ts`, `runloop.ts`,
+`local.ts`, or the tests' fake), a `ForgeStore` (Supabase or memory), and the personas. Keep it
+that way: nothing in the engine reads the environment, so a script and a test can run it whole.
+Every path that creates a sandbox tears it down in a `finally`; the one box that outlives a run is
+the winner's, and its handle (never a URL) is on the `candidate` row. The persona prompts are the
+Markdown files in `lib/forge/prompts/`; a change to one is a change to what Codex builds, so it is
+reviewed like code. `npm run forge:local -- --spec <ir.json> --no-push` runs the whole engine on
+this machine with no database; `npm run forge:sweep` shuts down devboxes a crash left behind.
 
 ## TypeScript
 

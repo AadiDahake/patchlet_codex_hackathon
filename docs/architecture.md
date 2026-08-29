@@ -152,19 +152,24 @@ Accepting the offer inserts an `escalation` row for the engine named by `ESCALAT
 
 - `local` leaves the row `queued`, and the worker's runner claims it. This is the simple-gap path:
   one process, one issue, one draft pull request.
-- `forge` is the Reflex/Runloop engine for capability-scale work: Codex personas building and
-  verifying inside isolated sandboxes, driven by the Capability IR that `packages/capability`
-  produced. `apps/web/lib/forge` owns it and is in progress on a parallel branch. Until it lands,
-  `forge` is a named seam: `POST /api/escalate` answers `503 {error, reason: "engine_unavailable"}`
-  when it is selected, and writes nothing, so no run is queued that nobody will claim.
+- `forge` is the sandbox engine in `apps/web/lib/forge` for capability-scale work: two candidates
+  build a compiled capability in parallel in isolated sandboxes, three Codex personas each, the
+  verification result picks the winner, and the winner serves a preview and opens the draft pull
+  request. The row waits `queued` until the opportunity has a compiled specification; the run
+  starts from `POST /api/opportunities/:groupId/forge`. `POST /api/escalate` answers
+  `503 {error, reason: "engine_unavailable"}` and writes nothing when the selected strategy has no
+  keys. The engine, its three strategies (Reflex, Runloop, local) and its trust boundary are in
+  `docs/forge.md`.
 
 The dashboard never needs to know which engine ran. Every engine writes the same statuses and the
 same trace events, so the console renders them identically.
 
-The run files the issue, inspects the repository, drafts the implementation, runs the target
+A `local` run files the issue, inspects the repository, drafts the implementation, runs the target
 repository's own typecheck and build as gates, opens a draft pull request, and then **pauses on a
 human decision**. The console writes `escalation.approval`; approval merges and watches the
-deployment until it is live.
+deployment until it is live. A `forge` run pauses the same way; on approval the approve route
+itself marks the pull request ready, merges it, watches the deployment and tears the winner's
+sandbox down.
 
 ## Tracing
 
@@ -178,13 +183,15 @@ Event `detail` payloads are free-form JSON. The console renders known shapes spe
 scores, diffs with per-line colouring, the pause as an approve card) and falls back to a key/value
 list for anything else, so a new event kind never breaks the page. The evidence loop reuses the
 same table: the compiler's decision trail arrives as `capability` events, and the sandboxes report
-as `candidate` and `preview` events from the `forge` source.
+as `candidate` and `preview` events from the `forge` source. `source` names the lane a row came from: `agent` for the chat turn, `workflow` for the
+worker, `forge` for the sandbox engine.
 
 ## Data
 
 Postgres with `pgvector`. One `project` row per customer, `document` and `chunk` for the knowledge
-base, `conversation` and `message` for chat history, `escalation` for the build pipeline, and
-`trace_event` for everything observable. Row level security is enabled on every table with no
+base, `conversation` and `message` for chat history, `escalation` for the build pipeline,
+`candidate` for each sandbox attempt of a forge run, `deployment_outcome` for what happened after
+a capability shipped, and `trace_event` for everything observable. Row level security is enabled on every table with no
 policies; the application only ever connects with the service role, which bypasses it. See
 `docs/contracts.md` for the full schema.
 
