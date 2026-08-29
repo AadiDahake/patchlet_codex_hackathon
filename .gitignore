@@ -14,4 +14,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.tsbuildinfo
+# Next writes this file on every dev and build run, and writes a different path
+# into it for each, so a committed copy can never stay clean.
+apps/web/next-env.d.ts
 # apps/web/public/widget.js is committed so the dashboard deployment serves it
