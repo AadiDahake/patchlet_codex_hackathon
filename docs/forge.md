@@ -93,7 +93,12 @@ variable names. The prompts are Markdown in `prompts/`:
 
 Every persona receives `.patchlet/spec.json` (the IR), `.patchlet/trajectories.json`,
 `.patchlet/acceptance.md` (rendered from the IR's postconditions, constraints, preferences and
-scenarios), and the target repository's `AGENTS.md` when it has one. The two candidates get one
+scenarios), and the target repository's `AGENTS.md` when it has one. Each prompt carries an
+"Authority" section: the specification is a product decision backed by real sessions and reviewed
+by a person, so it supersedes a repository rule that exists only to keep the capability absent
+(NovaAir's `AGENTS.md` tells an agent to raise group seating rather than add it, and its guard test
+bans the names). Every other rule of the repository stands. Without that section the first live
+run's Capability Builder obeyed the guard and changed nothing. The two candidates get one
 line each that differs: candidate A is told to prefer the most direct composition, candidate B to
 enumerate every result and rank it. The verifier decides between them.
 
