@@ -140,6 +140,27 @@ npm run db:seed      # idempotent seed, prints the embed key when it creates one
 Anything that needs credentials expects them in the environment. Supply them with your own secret
 manager rather than a file in the working tree.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on every push to `main`. Two jobs run in
+parallel. `web` uses Node 22 and runs `npm ci`, `npm run typecheck`, `npm run lint`, `npm test` and
+`npm run build`. `worker` uses Python 3.12 with `uv` and runs `uv sync --frozen` and
+`uv run --frozen pytest` in `services/worker`. Both jobs run with no secrets, so a fork's pull
+request is checked the same way as a branch; if a change makes the build need a variable, give it a
+safe placeholder in the workflow and teach the code to treat that placeholder as "not configured".
+One concurrency group per ref cancels the run a new push supersedes.
+
+Run the same commands locally before you push:
+
+```bash
+npm ci && npm run typecheck && npm run lint && npm test && npm run build
+cd services/worker && uv sync --frozen && uv run --frozen pytest
+```
+
+A dev run leaves the tree clean, and it has to stay that way: `next dev` must end with
+`git status --porcelain` empty. Next generates `apps/web/next-env.d.ts` on both `next dev` and
+`next build` and writes a different path into it for each, so the file is generated, not committed.
+
 ## Maintaining this file
 
 Keep this file short and durable. Record only what almost every future contributor needs. For
