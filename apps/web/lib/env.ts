@@ -53,11 +53,71 @@ export function githubOauthApp(): { clientId: string; clientSecret: string; redi
 export const vercelToken = (): string => required("VERCEL_TOKEN");
 
 /**
+ * The key Codex runs with inside a sandbox, or null to run on the machine's own saved Codex
+ * login. The local strategy accepts null; a devbox has no login, so the Runloop strategy does not.
+ */
+export const codexApiKey = (): string | null => process.env.OPENAI_API_KEY || null;
+
+export type ForgeStrategyName = "reflex" | "runloop" | "local";
+
+/**
+ * Where the forge engine builds a candidate.
+ *
+ * `reflex` launches the three personas by id on Reflex and is the primary path. `runloop` drives
+ * a Runloop devbox per candidate directly. `local` is a git worktree on this machine with the
+ * machine's own `codex`: the development strategy and the fallback when no key is present. An
+ * explicit `FORGE_STRATEGY` wins; otherwise the keys that are present decide, in that order.
+ */
+export function forgeStrategy(): ForgeStrategyName {
+  const explicit = process.env.FORGE_STRATEGY;
+  if (explicit === "local" || explicit === "runloop" || explicit === "reflex") return explicit;
+  if (process.env.REFLEX_API_KEY) return "reflex";
+  return process.env.RUNLOOP_API_KEY ? "runloop" : "local";
+}
+
+/** Reflex API key (`rfx_...`). Server-side only. */
+export const reflexApiKey = (): string => required("REFLEX_API_KEY");
+
+/** The Reflex organization every call is scoped to: an `org_...` id or the organization slug. */
+export const reflexOrganizationId = (): string => optional("REFLEX_ORGANIZATION_ID", "doing_something");
+
+/** The Reflex API base. */
+export const reflexApiUrl = (): string => optional("REFLEX_API_URL", "https://reflex.runloop.ai/api");
+
+/** The ids (`prs_...`) of the three personas, as created in the Reflex web app. */
+export function reflexPersonaIds(): {
+  capability_builder: string;
+  ux_builder: string;
+  capability_verifier: string;
+} {
+  return {
+    capability_builder: required("REFLEX_PERSONA_CAPABILITY_BUILDER"),
+    ux_builder: required("REFLEX_PERSONA_UX_BUILDER"),
+    capability_verifier: required("REFLEX_PERSONA_CAPABILITY_VERIFIER"),
+  };
+}
+
+/** Vercel token when one is set; the forge approval skips the deployment watch without it. */
+export const vercelTokenIfSet = (): string | null => process.env.VERCEL_TOKEN || null;
+
+/** Runloop API key. Server-side only. */
+export const runloopApiKey = (): string => required("RUNLOOP_API_KEY");
+
+/** A Runloop blueprint with Codex and the target's dependencies baked in. Optional. */
+export const runloopBlueprint = (): string | null => process.env.RUNLOOP_BLUEPRINT || null;
+
+/** `owner/name` of the repository a forge run targets when the project has none bound. */
+export const forgeTargetRepo = (): string => optional("FORGE_TARGET_REPO", "AadiDahake/novaair");
+
+/** Where the local strategy keeps its clone and its worktrees. Defaults to the OS temp dir. */
+export const forgeLocalCacheDir = (): string | null => process.env.FORGE_LOCAL_CACHE_DIR || null;
+
+/**
  * Which engine runs an escalation.
  *
- * `local` is the worker's own runner and is the default. `forge` is the named seam for the
- * Reflex/Runloop engine that builds a capability inside a sandbox; nothing implements it yet, so
- * `POST /api/escalate` refuses the run instead of writing a row nobody will pick up.
+ * `local` is the worker's own runner and is the default. `forge` is the sandbox engine in
+ * `lib/forge`: it builds a compiled capability in isolated sandboxes and opens the draft pull
+ * request from the winner.
  */
 export const escalationEngine = (): EscalationEngine =>
   optional("ESCALATION_ENGINE", "local") === "forge" ? "forge" : "local";
