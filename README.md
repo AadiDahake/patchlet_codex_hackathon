@@ -113,7 +113,8 @@ verified implementation  Reflex personas run Codex in Runloop sandboxes, then a 
 the outcome              PostHog again: adoption, completion, support volume
 ```
 
-`docs/architecture.md` walks the loop stage by stage; `docs/capability-compiler.md` is the compiler
+`docs/guidance.md` is how a question becomes a walk on the page: the site graph the console shows as
+the Product map, the route planner, and the measurements. `docs/architecture.md` walks the loop stage by stage; `docs/capability-compiler.md` is the compiler
 in full.
 
 ## Repository layout
@@ -123,7 +124,7 @@ README.md                 this file
 AGENTS.md                 conventions for anyone contributing here
 package.json              npm workspaces: packages/*, apps/*
 tsconfig.base.json        shared strict TypeScript options
-docs/                     PLAN.md, architecture.md, contracts.md, demo.md, deploy.md
+docs/                     PLAN.md, architecture.md, contracts.md, guidance.md, demo.md, deploy.md
 packages/shared/          @patchlet/shared - types and pure helpers, zero runtime deps
 packages/widget/          @patchlet/widget - Vite library build -> dist/patchlet.js
 apps/web/                 @patchlet/web - Next.js landing, console, and API routes
