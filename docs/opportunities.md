@@ -25,7 +25,7 @@ called a discovery, and one run is one `discovery` row.
 |---|---|---|---|
 | 0 | `queue.ts` | The turn ends `absent` (`lib/agent/turn.ts`), or the user reports the gap (`POST /api/escalate`), or the console asks (`POST /api/opportunities/:groupId/discover`). A `queued` row is inserted for the group, or the one already queued or running is joined. | `status` "Checking whether other customers hit this", on the conversation |
 | 2 | `mine.ts` | One HogQL query returns every successful seat-map session in the window as one row with its ordered steps; one more returns the session count and two medians. | `tool` "PostHog: 65 successful sessions in the last 90 days, median 14 interactions" |
-| 3 | `mine.ts` | The replay deep link is built for every session and kept only when PostHog confirms a recording exists. The rows are cached in `trajectory`, idempotent on `(group_id, session_id)`. | `artifact` "63 replays linked" |
+| 3 | `mine.ts`, `describe.ts` | The replay deep link is built for every session and kept only when PostHog confirms a recording exists. Every session is described once with the compiler's own step renderer and manual-step count, and the rows are cached in `trajectory` (`steps`, `rendered`, `manual_actions`), idempotent on `(group_id, session_id)`. | `artifact` "63 replays linked" |
 | 4 to 7 | `compile.ts` | `compile()` from `@patchlet/capability` with the OpenAI model client in `model.ts`. Every line of the decision trail is written in order as a `capability` row. A validated IR is stored as the group's next `capability_spec` version; the per-session goals and rewards land on the `trajectory` rows. | `capability` rows, one per compiler event; `artifact` "Capability specification v1: seat_party_together"; `decision` "missing_capability.discovered: seat_party_together" |
 | 7 | `run.ts` | The row is marked `done` with the decision, the supporting session count and the medians. The evidence line lands on the conversation that triggered the run. | `decision` "63 similar sessions worked around this by hand", on the conversation |
 | 19 | `measure.ts` | `POST /api/opportunities/:groupId/measure` runs the outcome query and stores a `deployment_outcome` row, labelled `seeded` when every outcome event carries `seeded: true`, else `posthog`. | `artifact` "90-day outcome (seeded)" |
@@ -49,6 +49,14 @@ Claiming is atomic either way, so the two can coexist. Status values: `queued`, 
 `done`, `failed`. At most one row per group is queued or running (a partial unique index); a
 second trigger joins it. The agent's triggers run once per group: a group with a finished run is
 left alone. The console's button always enqueues.
+
+### The console never evaluates the compiler
+
+`@patchlet/capability` reads its prompt files through `import.meta.url` when its modules load.
+Route handlers and the runner evaluate it fine; the App Router page layer does not (no URL at
+build time, a foreign URL at request time). So the pipeline does every rendering the page needs
+and stores it on the rows, and `lib/opportunity/read.ts` and the components import the package as
+types only. Keep it that way: a page that imports a compiler value breaks `next build`.
 
 ### Two medians
 

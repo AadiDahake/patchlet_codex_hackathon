@@ -202,6 +202,8 @@ create table trajectory (
   started_at timestamptz not null, ended_at timestamptz,
   step_count int not null default 0,
   steps jsonb not null,                    -- the ordered [{t, event, props}] list the compiler consumes
+  manual_actions int not null default 0,   -- the manual steps a capability call would replace, the compiler's count
+  rendered jsonb,                          -- the steps as prose, [{line, seconds}], the compiler's own rendering
   inferred_goal text, goal_name text, goal_confidence real,   -- OS-Genesis reverse task synthesis
   reward_completion real, reward_coherence real,              -- the two reward axes, never averaged
   replay_url text,                         -- the PostHog replay deep link; null when no recording exists
