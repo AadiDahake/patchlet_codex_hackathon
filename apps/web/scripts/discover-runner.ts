@@ -55,16 +55,20 @@ async function drain(): Promise<number> {
   }
 }
 
-log(`discovery runner ${worker} started${once ? " (once)" : ""}${model ? ` with ${model.name}` : ""}`);
-for (;;) {
-  try {
-    const ran = await drain();
-    if (once) {
-      log(`drained ${ran} run(s)`);
-      break;
+async function main(): Promise<void> {
+  log(`discovery runner ${worker} started${once ? " (once)" : ""}${model ? ` with ${model.name}` : ""}`);
+  for (;;) {
+    try {
+      const ran = await drain();
+      if (once) {
+        log(`drained ${ran} run(s)`);
+        return;
+      }
+    } catch (error) {
+      log(`runner error: ${(error as Error).message}`);
     }
-  } catch (error) {
-    log(`runner error: ${(error as Error).message}`);
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
-  await new Promise((resolve) => setTimeout(resolve, POLL_MS));
 }
+
+void main();

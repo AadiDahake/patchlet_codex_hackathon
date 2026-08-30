@@ -68,7 +68,8 @@ export class HttpPosthogClient implements PosthogClient {
    * way to tell Patchlet's queries apart when one is slow.
    */
   async query(name: string, hogql: string): Promise<QueryResult> {
-    const started = Date.now();
+    // The monotonic clock: a wall-clock correction mid-query would make the duration negative.
+    const started = performance.now();
     const response = await this.fetchImpl(`${this.base}/query/`, {
       method: "POST",
       headers: this.headers(),
@@ -89,7 +90,7 @@ export class HttpPosthogClient implements PosthogClient {
       columns: Array.isArray(body.columns) ? body.columns.map(String) : [],
       results: Array.isArray(body.results) ? (body.results as unknown[][]) : [],
       types: Array.isArray(body.types) ? (body.types as [string, string][]) : [],
-      durationMs: Date.now() - started,
+      durationMs: Math.round(performance.now() - started),
       cached: body.is_cached === true,
     };
   }
