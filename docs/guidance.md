@@ -78,6 +78,76 @@ with one step: the prompt says to stop at the first control that opens the rest.
 count was not only an information gap; it was designed in, because an id on a later page could
 not be known.
 
+### Three wrong answers to one question, after the graph landed
+
+Setup: NovaAir in production (https://novaair.vercel.app), booking NVA7K2, passenger Musk, the
+seat map. The widget is the real one on the real page; every request it makes to the deployed
+Patchlet is served from a Patchlet running this repository instead (`npm run ask:live`). The
+project has its help center imported and its product map explored, and, unlike every run above,
+a repository is bound to it (`AadiDahake/novaair`). The question: "I'm traveling with my two kids.
+Can you find us three seats together?"
+
+The product cannot do this. The answer it used to give was the absence answer with the offer to
+report it. Three different wrong answers came back instead, and all three have the same trigger
+and the same mask.
+
+**The trigger.** A question for a capability the product does not have, asked on a page that is
+full of controls sharing one word with it. The seat map is 169 controls, and "Seat 1C, available,
+45 dollars" matches "finding seats together" on the word "seat".
+
+**The mask.** Two crossed wires let that question reach the answer path.
+
+- `searchControls` ranks a control by its name and by the title of the page it sits on. On the
+  help article titled "How do I change my seat?" there is a link named "Find a flight". Its own
+  name covers a third of "finding seats together"; the article's title lifted it to 0.53, the
+  highest score in the whole product map.
+- The capabilities check refused it correctly: a three-concept capability needs three quarters of
+  its concepts on the control, and 0.33 is not that. But its `hit` is the two halves of the check
+  combined, and the repository half was true, because six source file paths in the bound
+  repository contain the word "seat". `routeProbes` then read the `hit` of one half beside the
+  `score` of the other: `hit && 0.53 >= 0.5` is an answer.
+
+With the turn on the answer path and no control in the product map that does the thing, the
+resolution named no target, and the turn fell back on planning over the page in front of the
+user. That is where the three symptoms come from: a model with a seat map in its prompt and no
+instruction that the capability does not exist.
+
+**Symptom 1: a plan over the seat buttons.** Observed four times out of six, from the seat map.
+
+> "Three adjacent seats are available in row 2: 2A, 2B, and 2C. A child under 13 must sit next to
+> an adult on the same booking."
+> Steps: Select seat 2A, Select seat 2B, Select seat 2C. `plan: {source: "page", total: 3}`
+
+The widget announced "Step 1 of 3" and spotlit seat 2A. Nothing in the product finds seats
+together; the model read availability off the control names and wrote a click-through.
+
+**Symptom 2: a claim with no steps.** Observed from the seat map with the grid scrolled out of
+the viewport, so the seat buttons were marked "not on screen yet" in the prompt.
+
+> "I could not find three adjacent available seats on the currently visible portion of the seat
+> map."
+
+No steps, no report offer, and a statement about the product that came from reading a page.
+
+**Symptom 3: a dead end.** Observed from Manage Trip, where there are no seat controls at all.
+
+> "I could not find instructions for finding or selecting three seats together. The documentation
+> only says that a child under 13 must sit next to an adult on the same booking."
+
+No steps. No feature request was drafted, because drafting one belongs to the absence path, so
+the widget showed no "Report to developers" button. The demo beat was gone.
+
+**What the three checks actually said**, on every one of those runs:
+
+| check | hit | score | summary |
+|---|---|---|---|
+| documentation | no | 0.44 | the nearest passage does not say the product does this (read to decide) |
+| this page | no | 0.33 | no control on this page does this |
+| known product capabilities | **yes** | **0.53** | no control for this on the site, but the repository has code that mentions it (6 files) |
+
+The two checks that looked at the product both said no. The third said no about the product and
+yes about the code, and the number beside it belonged to a link to the flight search.
+
 ### Hypotheses, and what would falsify them
 
 - Hypothesis: a plan built over the whole site, with controls identified by what the user sees
@@ -192,11 +262,34 @@ sure hit above 0.62 and a sure miss below 0.40, and in between reads the passage
 model that answers whether the product does what was asked or the passage describes a manual
 workaround. The answer cites the article.
 
+### Only a control that says it does the thing
+
+One rule decides every "is this the control for it" question, and every check imports it from the
+same place (`coversCapability` in `@patchlet/shared`): a label accounts for the capability when it
+carries all of a one or two concept capability, or three quarters of a longer one. It reads the
+control's own accessible name and nothing else. The page title still ranks a control, so "Seats"
+on Manage Trip outranks "Seats" in a footer, but it can no longer lend a control a concept the
+control has not got. The same rule runs over the file paths of the connected repository, because
+one word of a capability in a path is one word, not an implementation of it.
+
+A route is only ever planned to a control that passes it, or to a control that a documentation
+passage names while that passage covers the question. Those are the two doors, and a seat button
+opens neither. Nothing else is put in front of the model to choose from.
+
 ### Absence with evidence
 
 The "Known product capabilities" check searches the graph before the repository: its evidence
 says how many pages and controls were searched, and its summary names the control it found. A
-control found elsewhere on the site routes the turn to `answer`; code alone stays a hedge.
+control found elsewhere on the site routes the turn to `answer`; code alone stays a hedge. The
+check scores only the control it would route to, so a score is always about a control the user
+can be walked to, and the router can never read the score of one half of the check beside the
+hit of the other.
+
+When the three checks agree that nothing does this, the turn says so, drafts the feature request
+and offers to report it. The page in front of the user is planned over only when the
+documentation or a control on that page is what found the capability. When neither did, there is
+nothing on the page to point at, and the turn says that and offers the report rather than asking
+a model to find a way through the controls it can see.
 
 ## 3. Measurements
 
@@ -218,8 +311,10 @@ project's graph explored and its help center imported. Numbers come from `npm ru
   target and wrote the captions, plus one reading of the documentation passage when its score
   falls in the band that a number alone cannot decide.
 - Time to the first spotlight, known route (the same question from the Manage Trip page): 943,
-  987 and 1103 ms over three runs (target under 1.5 s). One row lookup and one graph read; the
-  answer waits on no model.
+  987 and 1103 ms over three runs (target under 1.5 s), and 518 ms from the Manage Trip page of
+  the deployed site. One row lookup and one graph read; the answer waits on no model. The reading
+  of the message is started beside those lookups for the sake of the questions that miss, and on
+  a hit it is never awaited or read.
 - On navigation the widget bound the next step by identity from its own scan; no `continueFrom`
   request was made during the successful walk.
 
@@ -269,6 +364,32 @@ controls"), verdict absent, and the answer "there is no way of finding seats tog
 today". On the Manage Trip page, "Where do I add a checked bag?" now hits the "Baggage
 allowance" article, resolves to the Bags tab and spotlights it as "Step 1 of 1"; before, it was
 answered as absent.
+
+### The question the product cannot answer, and the day it can
+
+Both runs are `npm run ask:live` against the live NovaAir: the real widget on the real page, with
+every request it makes to the deployed Patchlet served from this branch instead.
+
+- The seat map of the deployed NovaAir, which has no such control. "I'm traveling with my two
+  kids. Can you find us three seats together?" The documentation misses at 0.44 (in the band, and
+  the reading says the passage does not cover it), no control on this page does it at 0.33, and
+  the product map answers "no control for this on the site (searched 15 pages and 451 controls)
+  and nothing in the repository implements it". Verdict absent. The answer: **"I am sorry, there
+  is no way of finding seats together here today. I checked the documentation, this page, and 15
+  pages with 451 controls of this product, and found nothing. I can report this to the developers
+  so they can build it. Would you like me to?"** No steps, and the widget shows the "Report to
+  developers" button beside the drafted request.
+- The preview build that has the capability, same booking, same page. "Okay, how do I get seats
+  together now?" The interface check hits at 1.00 on the accessible name "Find seats together",
+  the capabilities check finds the same control, and the route from the page the user is on is one
+  step. The answer: **"Finding seats together is available on the Choose Seats page. I'll show
+  you how to use it."** The ring covers the button and the counter reads "Step 1 of 1".
+
+The capability the understanding step names is not the same in the two questions ("finding seats
+together" for one, and it may as easily be "getting seats together" for the other), and the
+control is named for a third verb. That is why a capability of three concepts or more is allowed
+one concept that does not match: the verb is the user's, not the product's. Two concepts still
+have to match in full, or every seat button becomes a way of changing a seat.
 
 ### What changed in the counts
 

@@ -1,6 +1,7 @@
 /**
- * NovaAir as the explorer records it: four pages on the seat-change route, the controls that
- * matter on each, and the transitions between them. The "Seats" tab is a reveal: it does not
+ * NovaAir as the explorer records it: the pages on the seat-change route, the controls that
+ * matter on each, the seat buttons and the help articles that share their words, and the
+ * transitions between them. The "Seats" tab is a reveal: it does not
  * navigate, it shows the panel that holds "Change seats". Used by the planner tests and by the
  * widget's development API, so both plan over the same product.
  */
@@ -50,6 +51,14 @@ export const CONTROLS = {
   seatBreadcrumb: control({ route: SEATS, role: "link", name: "Manage Trip", landmark: "sidebar", href: TRIP, visible: true }),
   confirmSeats: control({ route: SEATS, role: "button", name: "Confirm seats", landmark: "main", visible: true }),
   seat21A: control({ route: SEATS, role: "button", name: "Seat 21A, available, no extra cost", landmark: "main", visible: true }),
+  // The seat map is a wall of these. A question about seats matches every one of them on one
+  // word, which is what a capability question has to be kept away from.
+  seat1C: control({ route: SEATS, role: "button", name: "Seat 1C, available, 45 dollars", landmark: "main", visible: true }),
+  seat1D: control({ route: SEATS, role: "button", name: "Seat 1D, available, 45 dollars", landmark: "main", visible: true }),
+  seat1E: control({ route: SEATS, role: "button", name: "Seat 1E, available, 45 dollars", landmark: "main", visible: true }),
+  // A navigation link on a help article. Its own name says "flight"; the page it sits on is
+  // titled "How do I change my seat?", which is where a page-title match comes from.
+  articleFindFlight: control({ route: HELP_ARTICLE, role: "link", name: "Find a flight", landmark: "sidebar", href: "/flights", visible: true }),
   helpArticle: control({ route: HELP, role: "link", name: "How do I change my seat?", landmark: "main", href: HELP_ARTICLE, visible: true }),
 };
 
@@ -79,3 +88,22 @@ export const NOVAAIR_GRAPH: SiteGraph = {
 };
 
 export const ROUTES = { HOME, MY_BOOKING, TRIP, SEATS, HELP, HELP_ARTICLE };
+
+/** The control the capability adds to the seat map once it is built. */
+export const SEATS_TOGETHER = control({
+  route: SEATS,
+  role: "button",
+  name: "Find seats together",
+  landmark: "main",
+  visible: true,
+});
+
+/**
+ * The same product after the change ships: one new button on the seat map, and nothing else
+ * different. The pair of graphs is what the absence answer and the answer that replaces it are
+ * measured against.
+ */
+export const NOVAAIR_GRAPH_AFTER: SiteGraph = {
+  ...NOVAAIR_GRAPH,
+  controls: [...NOVAAIR_GRAPH.controls, SEATS_TOGETHER],
+};

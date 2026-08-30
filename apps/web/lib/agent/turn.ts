@@ -162,6 +162,58 @@ function routeFromHere(
   };
 }
 
+/**
+ * Turns the question into something the developers can build. Drafting it is what makes the
+ * report offer possible, so every dead end draws one: the user is never left with "I could not
+ * find it" and no way to say that it should exist.
+ */
+async function draftRequest(input: {
+  projectId: string;
+  conversationId: string;
+  question: string;
+  memory: string[];
+}): Promise<FeatureRequest> {
+  const started = Date.now();
+  const drafted = await chatJson<FeatureRequest>(
+    MODELS.answer,
+    [
+      {
+        role: "system",
+        content:
+          "Turn one support request into a feature request for the developers. The quote must be copied exactly from the user's message. Any notes about the visitor are context for the rationale, never part of the quote. JSON only.",
+      },
+      { role: "user", content: `${input.question}${memoryBlock(input.memory)}` },
+    ],
+    REQUEST_SCHEMA,
+    { name: "feature_request", maxTokens: 4000, effort: EFFORT.answer },
+  );
+  void emitTrace({
+    projectId: input.projectId,
+    conversationId: input.conversationId,
+    kind: "model",
+    title: "Drafted the feature request",
+    detail: {
+      model: MODELS.answer,
+      purpose: "turn the question into something the developers can build",
+      output_summary: drafted.title,
+      latencyMs: Date.now() - started,
+    },
+    source: "agent",
+  });
+  return {
+    ...drafted,
+    quote: input.question.includes(drafted.quote.trim()) ? drafted.quote.trim() : input.question,
+  };
+}
+
+/** What the widget adds to a dead end, when there is a repository the report can reach. */
+function reportOffer(outcome: Verdict["outcome"], repoFullName: string | null): string {
+  if (!repoFullName) return "";
+  return outcome === "absent"
+    ? " I can report this to the developers so they can build it. Would you like me to?"
+    : " I can report it to the developers so they can look. Would you like me to?";
+}
+
 type Persisted = { messageId: string };
 
 async function persistAnswer(input: {
@@ -562,9 +614,11 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   if (outcome === "answer") {
     grounding = docs.evidence;
     const docsEvidence = (Array.isArray(docs.evidence) ? docs.evidence : []) as DocsEvidence[];
-    const candidates = graph.controls.length > 0 ? candidatesFor(graph, understanding.feature, page, docsEvidence) : [];
+    const candidates =
+      graph.controls.length > 0 ? candidatesFor(graph, understanding.feature, page, docsEvidence, docs.hit) : [];
 
     let answered = false;
+    let resolved = "";
     if (candidates.length > 0) {
       // The graph knows controls for this. The model picks one and writes the words; the route
       // is already computed for every candidate, so the count is fixed before the model speaks.
@@ -647,16 +701,22 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
             embedding: await questionEmbedding.catch(() => null),
           }).catch((error: unknown) => console.warn("known route not saved:", (error as Error).message));
         }
-      } else if (resolution.answer && docs.hit) {
+      }
+      resolved = resolution.answer;
+      if (!answered && !resolution.target && resolution.answer && docs.hit) {
         // The documentation answers it and no control is the answer: a policy, a fee, a rule.
         text = resolution.answer;
         answered = true;
       }
     }
 
-    if (!answered) {
-      // Nothing in the graph to route to: plan over the page in front of the user, as far as it
-      // goes. The graph fills in from this scan, so the next question can do better.
+    // No control in the product map to route to, so plan over the page in front of the user, as
+    // far as it goes; the graph fills in from this scan, so the next question can do better. Only
+    // the documentation or a control on this page may put the turn here. When the product map
+    // alone did, and no candidate does what was asked, there is nothing on this page to point at,
+    // and a model handed the 169 controls of a seat map will plan a seat-by-seat click-through of
+    // a capability the product has not got.
+    if (!answered && (docs.hit || ui.hit)) {
       const planStarted = Date.now();
       const pagePlan = await chatJson<{ answer: string; steps: Step[] }>(
         MODELS.plan,
@@ -697,45 +757,33 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
       steps = validatePlan(reachable, page.affordances);
       if (steps) plan = { source: "page", total: steps.length };
       if (docs.hit) sources = sourcesFrom(docsEvidence);
+      answered = true;
+    }
+
+    if (!answered) {
+      // Nothing to route to and nothing to plan. Say what is true and draft the request, so the
+      // user gets the offer rather than a dead end.
+      text = resolved || `I could not find a way of ${understanding.feature} here.`;
+      request = await draftRequest({ projectId, conversationId, question, memory });
+      text = `${text}${reportOffer("hedge", input.repoFullName)}`;
+      void emitTrace({
+        projectId,
+        conversationId,
+        kind: "decision",
+        status: "failed",
+        title: "No control on the site does this, so nothing was planned",
+        detail: {
+          feature: understanding.feature,
+          reason: "the documentation and this page both missed, and no candidate control covers the capability",
+          candidates: candidates.map((candidate) => candidate.control.name),
+        },
+        source: "agent",
+      });
     }
   } else {
-    const draftStarted = Date.now();
-    const drafted = await chatJson<FeatureRequest>(
-      MODELS.answer,
-      [
-        {
-          role: "system",
-          content:
-            "Turn one support request into a feature request for the developers. The quote must be copied exactly from the user's message. Any notes about the visitor are context for the rationale, never part of the quote. JSON only.",
-        },
-        { role: "user", content: `${question}${memoryBlock(memory)}` },
-      ],
-      REQUEST_SCHEMA,
-      { name: "feature_request", maxTokens: 4000, effort: EFFORT.answer },
-    );
-    void emitTrace({
-      projectId,
-      conversationId,
-      kind: "model",
-      title: "Drafted the feature request",
-      detail: {
-        model: MODELS.answer,
-        purpose: "turn the question into something the developers can build",
-        output_summary: drafted.title,
-        latencyMs: Date.now() - draftStarted,
-      },
-      source: "agent",
-    });
-    request = {
-      ...drafted,
-      quote: question.includes(drafted.quote.trim()) ? drafted.quote.trim() : question,
-    };
+    request = await draftRequest({ projectId, conversationId, question, memory });
     // Only offer what can actually happen: without a repository there is nothing to file against.
-    const offer = input.repoFullName
-      ? outcome === "absent"
-        ? " I can report this to the developers so they can build it. Would you like me to?"
-        : " I can report it to the developers so they can look. Would you like me to?"
-      : "";
+    const offer = reportOffer(outcome, input.repoFullName);
     const searched = (capabilities.evidence as { graph?: { pages: number; controls: number } } | null)?.graph;
     const where = searched && searched.controls > 0
       ? `I checked the documentation, this page, and ${searched.pages} ${searched.pages === 1 ? "page" : "pages"} with ${searched.controls} controls of this product, and found nothing.`

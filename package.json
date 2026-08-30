@@ -27,6 +27,7 @@
     "tail": "node scripts/patchlet-tail.mjs",
     "seed:site": "tsx --tsconfig apps/web/tsconfig.json scripts/seed-site.ts",
     "e2e:guide": "playwright test",
+    "ask:live": "node scripts/ask-live.mjs",
     "eval:docs": "tsx --tsconfig apps/web/tsconfig.json scripts/eval-docs.ts",
     "explore": "tsx --tsconfig apps/web/tsconfig.json scripts/explore.ts"
   },

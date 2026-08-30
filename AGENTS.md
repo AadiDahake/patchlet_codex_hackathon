@@ -141,6 +141,22 @@ Three rules make that safe, and they hold for anything added here later:
   `apps/web/test/fixtures/intents.ts` hold it to them. `understand.live.test.ts` runs them against
   the real model and skips itself without a key; change the prompt and run it.
 
+## A route is only ever planned to a control that does the thing
+
+`coversCapability` in `@patchlet/shared` is the one rule behind every "is this the control for it"
+decision: a label accounts for a capability when it carries all of a one or two concept capability,
+or all but one of a longer one, reading the control's own accessible name and never the title of
+the page it sits on. The interface check, the capabilities check and the candidates a route may be
+planned to all import it, so they cannot drift apart. A control is a candidate when its name covers
+the capability, or when a documentation passage names it and the documentation check says that
+passage covers the question. There is no third door, and nothing else is put in front of the model
+to choose from.
+
+When the three checks agree that nothing does this, the turn says so and offers the report. The
+page in front of the user is planned over only when the documentation or a control on that page is
+what found the capability; without that, a model handed a seat map will plan a walk through a
+capability the product has not got. `docs/guidance.md` has the runs this rule comes from.
+
 ## Guiding a user on their own page
 
 The widget watches the host page; it never drives it. The plan it walks is a route over the site
@@ -223,6 +239,7 @@ npm run eval:docs    # the offline set that tunes the documentation check, again
 npm run e2e:guide    # the guided walk on NovaAir, against the widget's mock API or a running stack
 npm run discover:runner -- --once     # drain the discovery queue; --model codex compiles on the saved Codex login
 PATCHLET_CONSOLE_TOKEN=... npm run tail   # the evidence loop as a board in the terminal
+npm run ask:live -- "<question>" [home|trip|seats]   # the live site, answered by this working tree
 ```
 
 Screenshots come from `scripts/screenshots.mjs` (Playwright, one private browser per run), never

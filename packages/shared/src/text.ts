@@ -82,3 +82,30 @@ export function keywordScore(query: string, candidate: string): number {
   for (const concept of wanted) if (have.has(concept)) matched += 1;
   return matched / wanted.size;
 }
+
+/**
+ * The share of a capability's concepts one label has to carry before that label counts as the
+ * thing itself.
+ *
+ * A capability of one or two concepts needs all of them: half of "changing a seat" is "seat", and
+ * "Seat 12A" is a seat, not a way of changing one. A longer capability needs all but one, because
+ * the one that is allowed to differ is the verb the question happened to use. "Find seats
+ * together" is the control for "getting seats together" and for "finding seats together"; it is
+ * not the control for "changing a seat", and no seat button is the control for either.
+ */
+export function coverageNeeded(capability: string): number {
+  const size = concepts(capability).size;
+  if (size <= 2) return 1;
+  return (size - 1) / size;
+}
+
+/**
+ * Whether a label - a control's accessible name, a file path - accounts for the capability
+ * itself rather than for one word of it. This is the one rule behind every "is this the control
+ * for it" decision: the interface check, the capabilities check, and the candidates a route may
+ * be planned to.
+ */
+export function coversCapability(capability: string, label: string): boolean {
+  const needed = coverageNeeded(capability);
+  return keywordScore(capability, label) >= needed;
+}

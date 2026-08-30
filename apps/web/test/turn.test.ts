@@ -6,8 +6,12 @@
  * still runs the three checks and still comes back with a walk over the product map.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatEvent } from "@patchlet/shared";
-import { CONTROLS, NOVAAIR_GRAPH } from "../../../packages/shared/test/fixtures/novaair-graph";
+import type { ChatEvent, PageContext } from "@patchlet/shared";
+import {
+  CONTROLS,
+  NOVAAIR_GRAPH,
+  NOVAAIR_GRAPH_AFTER,
+} from "../../../packages/shared/test/fixtures/novaair-graph";
 import type { KnownRoute } from "@/lib/graph/store";
 import { TRIP_PAGE } from "./fixtures/intents";
 
@@ -28,9 +32,13 @@ vi.mock("@/lib/openai", () => ({
     options: { name?: string },
   ) => {
     const name = options.name ?? "";
-    calls.push({ name, user: messages[messages.length - 1]?.content ?? "" });
+    const user = messages[messages.length - 1]?.content ?? "";
+    calls.push({ name, user });
     if (!(name in answers)) throw new Error(`the turn made an unexpected "${name}" call`);
-    return answers[name];
+    const scripted = answers[name];
+    // An answer may be a function, so a stand-in for the model can read the prompt it was given
+    // and choose the way the model does: by the name of a control, never by its position.
+    return typeof scripted === "function" ? (scripted as (prompt: string) => unknown)(user) : scripted;
   },
   embed: async (inputs: string[]) => inputs.map(() => new Array(1536).fill(0)),
 }));
@@ -73,16 +81,22 @@ vi.mock("@/lib/supabase", () => ({
 
 /** The route this question resolved to last time, when the test wants one. */
 let remembered: KnownRoute | null = null;
+/** The product map this turn plans over: before the capability is built, or after. */
+let graph: typeof NOVAAIR_GRAPH = NOVAAIR_GRAPH;
+/** Every route the turn remembered for the next visitor. */
+const saved: unknown[] = [];
 
 vi.mock("@/lib/graph/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/graph/store")>();
   return {
     ...actual,
     recordScan: async () => "page-1",
-    loadGraph: async () => NOVAAIR_GRAPH,
+    loadGraph: async () => graph,
     findKnownRoute: async () => remembered,
     nearestKnownRoute: async () => null,
-    saveKnownRoute: async () => undefined,
+    saveKnownRoute: async (_projectId: string, input: unknown) => {
+      saved.push(input);
+    },
     touchKnownRoute: async () => undefined,
   };
 });
@@ -109,28 +123,80 @@ vi.mock("@/lib/opportunity/queue", () => ({
 const { runTurn } = await import("@/lib/agent/turn");
 
 /** The whole stream of one turn, in the order the widget would receive it. */
-async function stream(question: string): Promise<ChatEvent[]> {
+async function stream(
+  question: string,
+  page: PageContext = TRIP_PAGE,
+  repoFullName: string | null = "novaair/novaair",
+): Promise<ChatEvent[]> {
   const events: ChatEvent[] = [];
   for await (const event of runTurn({
     projectId: "project-1",
-    repoFullName: "novaair/novaair",
+    repoFullName,
     defaultBranch: "main",
     question,
-    page: TRIP_PAGE,
+    page,
   })) {
     events.push(event);
   }
   return events;
 }
 
+/** The seat map: a wall of buttons that each share one word with a question about seats. */
+const SEAT_MAP: PageContext = {
+  url: "http://localhost:4150/trips/NVA7K2/seats",
+  title: "Choose Seats | NovaAir",
+  text: "Choose Seats. Select a passenger, then select a seat. One passenger moves at a time.",
+  affordances: [
+    { id: "s1", role: "link", name: "Manage Trip", landmark: "sidebar", href: "/trips/NVA7K2", visible: true },
+    { id: "s2", role: "button", name: "Seat 1C, available, 45 dollars", landmark: "main", visible: true },
+    { id: "s3", role: "button", name: "Seat 1D, available, 45 dollars", landmark: "main", visible: true },
+    { id: "s4", role: "button", name: "Seat 1E, available, 45 dollars", landmark: "main", visible: true },
+    { id: "s5", role: "button", name: "Confirm seats", landmark: "main", visible: true },
+  ],
+};
+
+/** The same seat map on the day the capability ships. */
+const SEAT_MAP_AFTER: PageContext = {
+  ...SEAT_MAP,
+  affordances: [
+    ...SEAT_MAP.affordances,
+    { id: "s6", role: "button", name: "Find seats together", landmark: "main", visible: true },
+  ],
+};
+
+const HOME: PageContext = {
+  url: "http://localhost:4150/",
+  title: "NovaAir",
+  text: "NovaAir. Fly the quiet way.",
+  affordances: [
+    { id: "h1", role: "link", name: "My Booking", landmark: "sidebar", href: "/my-booking", visible: true },
+    { id: "h2", role: "link", name: "My Booking", landmark: "main", href: "/my-booking", visible: true },
+    { id: "h3", role: "link", name: "Find a flight", landmark: "main", href: "/flights", visible: true },
+  ],
+};
+
+const SEATS_TOGETHER = "I'm traveling with my two kids. Can you find us three seats together?";
+
+/** The passage the seats-together question really lands on, and what it really says. */
+const CHILDREN_PASSAGE = {
+  document_title: "Traveling with children",
+  source_ref: "http://localhost:4150/help/traveling-with-children",
+  heading: "Traveling with children",
+  content: "A child under 13 must sit next to an adult on the same booking. Move one passenger at a time.",
+  similarity: 0.62,
+  confidence: null,
+};
+
 const answerOf = (events: ChatEvent[]) => events.find((event) => event.type === "answer");
 
 beforeEach(() => {
   calls.length = 0;
   writes.length = 0;
+  saved.length = 0;
   chunks = [];
   answers = {};
   remembered = null;
+  graph = NOVAAIR_GRAPH;
   discoveries.length = 0;
 });
 
@@ -316,5 +382,151 @@ describe("a question asked before", () => {
     const answer = answerOf(events);
     expect(answer?.plan).toMatchObject({ source: "cached", total: 1 });
     expect(events.find((event) => event.type === "understanding")).toMatchObject({ intent: "product" });
+  });
+});
+
+describe("a capability the product does not have", () => {
+  beforeEach(() => {
+    chunks = [CHILDREN_PASSAGE];
+    answers = {
+      understanding: { intent: "product", feature: "finding seats together" },
+      passage_read: { covers: false, reason: "it says to move one passenger at a time" },
+      verdict: { exists: false, confidence: 0.9, reasoning: "no control and no passage says it can be done" },
+      feature_request: {
+        title: "Find seats together for a party",
+        description: "Let a family take three seats side by side in one move.",
+        area: "seats",
+        quote: "Can you find us three seats together?",
+        rationale: "Today they rebook one passenger at a time.",
+      },
+    };
+  });
+
+  it("states the absence and offers the report, from the seat map", async () => {
+    const events = await stream(SEATS_TOGETHER, SEAT_MAP);
+    const answer = answerOf(events);
+
+    expect(events.find((event) => event.type === "verdict")?.verdict.outcome).toBe("absent");
+    expect(answer?.steps).toBeNull();
+    expect(answer?.plan).toBeUndefined();
+    expect(answer?.text).toContain("there is no way of finding seats together here today");
+    expect(answer?.text).toContain("I can report this to the developers");
+    expect(answer?.escalation).toMatchObject({ offered: true });
+  });
+
+  it("never asks a model to find steps on the page it is standing on", async () => {
+    await stream(SEATS_TOGETHER, SEAT_MAP);
+    // No "resolve_target" and no "plan" is scripted, so either call would have thrown by name.
+    expect(calls.map((call) => call.name)).toEqual([
+      "understanding",
+      "passage_read",
+      "verdict",
+      "feature_request",
+    ]);
+  });
+
+  it("returns no step whose target is a seat button, from any page", async () => {
+    for (const page of [SEAT_MAP, TRIP_PAGE, HOME]) {
+      const answer = answerOf(await stream(SEATS_TOGETHER, page));
+      const seats = new Set(
+        page.affordances.filter((affordance) => affordance.name.startsWith("Seat ")).map((affordance) => affordance.id),
+      );
+      for (const step of answer?.steps ?? []) expect(seats.has(String(step.target))).toBe(false);
+      expect(answer?.steps).toBeNull();
+    }
+  });
+
+  it("says so without offering a report when there is no repository to file against", async () => {
+    const answer = answerOf(await stream(SEATS_TOGETHER, SEAT_MAP, null));
+    expect(answer?.text).not.toContain("report");
+    expect(answer?.escalation).toMatchObject({ offered: false });
+  });
+});
+
+describe("the same question once the capability is built", () => {
+  beforeEach(() => {
+    graph = NOVAAIR_GRAPH_AFTER;
+    chunks = [CHILDREN_PASSAGE];
+    answers = {
+      passage_read: { covers: false, reason: "it says to move one passenger at a time" },
+      resolve_target: {
+        target: "c1",
+        answer: "NovaAir supports this directly now. I will show you.",
+        captions: ["Select Find seats together"],
+      },
+    };
+  });
+
+  it("resolves to the new control and spotlights it as the one step there is", async () => {
+    // The verb the reading reaches for must not decide the answer: the button is named for one
+    // verb, and the visitor may as easily have used another.
+    for (const feature of ["finding seats together", "getting seats together"]) {
+      answers.understanding = { intent: "product", feature };
+      const events = await stream("Okay, how do I get seats together now?", SEAT_MAP_AFTER);
+      const answer = answerOf(events);
+
+      expect(events.find((event) => event.type === "verdict")?.verdict.outcome).toBe("answer");
+      expect(answer?.plan).toMatchObject({ source: "graph", total: 1 });
+      expect(answer?.steps?.map((step) => step.target)).toEqual(["s6"]);
+      expect(answer?.steps?.[0]?.control?.name).toBe("Find seats together");
+      expect(answer?.text).toContain("NovaAir supports this directly");
+      // Nothing is missing any more, so nothing is drafted and nothing is offered.
+      expect(answer?.escalation).toMatchObject({ offered: false });
+      expect(calls.map((call) => call.name)).not.toContain("feature_request");
+      expect(discoveries).toHaveLength(0);
+    }
+  });
+
+  it("remembers the route, so the next visitor is answered without a model", async () => {
+    answers.understanding = { intent: "product", feature: "finding seats together" };
+    await stream("Okay, how do I get seats together now?", SEAT_MAP_AFTER);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ target: { key: "button|find seats together|main|" } });
+  });
+});
+
+describe("the walk that has to keep its count", () => {
+  beforeEach(() => {
+    chunks = [
+      {
+        document_title: "How do I change my seat?",
+        source_ref: "http://localhost:4150/help/how-do-i-change-my-seat",
+        heading: "Change a seat online",
+        content: "On the Manage Trip page, go to the Seats section and select Change seats.",
+        similarity: 0.94,
+        confidence: null,
+      },
+    ];
+    answers = {
+      understanding: { intent: "product", feature: "changing a seat" },
+      // The stand-in for the resolution model: pick the candidate named "Change seats", the way
+      // the model does, by name and never by position.
+      resolve_target: (user: string) => ({
+        target: user.split("\n").find((row) => /^c\d+: .*"Change seats"/.test(row))?.split(":")[0] ?? "none",
+        answer: "Seat changes live under Manage Trip, in Change seats. I will show you the way.",
+        captions: ["Open My Booking", "Fill in the form, then select Find my booking", "Open Change seats"],
+      }),
+    };
+  });
+
+  it("is three steps from the home page, and only the first is bound to a live id", async () => {
+    const answer = answerOf(await stream("Where do I change my seat?", HOME));
+    expect(answer?.plan).toEqual({
+      source: "graph",
+      total: 3,
+      destination: { route: "/trips/:id", title: "Manage Trip | NovaAir" },
+    });
+    expect(answer?.steps?.map((step) => step.control?.name)).toEqual([
+      "My Booking",
+      "Find my booking",
+      "Change seats",
+    ]);
+    expect(answer?.steps?.map((step) => step.target)).toEqual([expect.stringMatching(/^h[12]$/), null, null]);
+  });
+
+  it("is one step from Manage Trip", async () => {
+    const answer = answerOf(await stream("Where do I change my seat?", TRIP_PAGE));
+    expect(answer?.plan?.total).toBe(1);
+    expect(answer?.steps?.map((step) => step.target)).toEqual(["a4"]);
   });
 });
