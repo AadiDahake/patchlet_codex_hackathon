@@ -14,6 +14,15 @@ export function OPTIONS(): Response {
 
 type Body = Partial<ChatRequest>;
 
+/** The project's routing thresholds, when its settings carry numbers for them. */
+function thresholdsOf(settings: unknown): { docsThreshold?: number; interfaceThreshold?: number } {
+  const record = (settings ?? {}) as Record<string, unknown>;
+  const thresholds: { docsThreshold?: number; interfaceThreshold?: number } = {};
+  if (typeof record.docsThreshold === "number") thresholds.docsThreshold = record.docsThreshold;
+  if (typeof record.interfaceThreshold === "number") thresholds.interfaceThreshold = record.interfaceThreshold;
+  return thresholds;
+}
+
 /** One or more events as a finished server-sent stream, for a response with nothing to wait on. */
 function sse(events: ({ type: string } & Record<string, unknown>)[]): Response {
   const body = events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
@@ -34,7 +43,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const { data: project } = await serviceClient()
     .from("project")
-    .select("id, repo_full_name, repo_default_branch")
+    .select("id, repo_full_name, repo_default_branch, settings")
     .eq("embed_key", key)
     .maybeSingle();
   if (!project) {
@@ -71,6 +80,7 @@ export async function POST(request: Request): Promise<Response> {
           page,
           conversationId: body.conversationId,
           visitorId: typeof body.visitorId === "string" ? body.visitorId.slice(0, 64) : undefined,
+          thresholds: thresholdsOf(project.settings),
         })) {
           send(event);
         }

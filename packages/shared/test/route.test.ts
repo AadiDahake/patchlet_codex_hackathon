@@ -36,10 +36,13 @@ describe("routeProbes", () => {
     expect(routeProbes(results)).toBe("absent");
   });
 
-  it("honours a raised documentation threshold", () => {
+  it("trusts the documentation check's decision, which applied the project's threshold itself", () => {
+    // A passage below the line is only ever a hit because the check read it and it covered the
+    // question, so a raised threshold here does not overrule that reading.
     const results = [probe("docs", true, 0.72), probe("interface", false, 0), probe("repository", false)];
-    expect(routeProbes(results)).toBe("answer");
-    expect(routeProbes(results, { docsThreshold: 0.9 })).toBe("absent");
+    expect(routeProbes(results, { docsThreshold: 0.9 })).toBe("answer");
+    const miss = [probe("docs", false, 0.95), probe("interface", false, 0), probe("repository", false)];
+    expect(routeProbes(miss)).toBe("absent");
   });
 
   it("honours a lowered interface threshold", () => {
@@ -54,5 +57,29 @@ describe("routeProbes", () => {
 
   it("reports absence when a probe is missing entirely", () => {
     expect(routeProbes([])).toBe("absent");
+  });
+});
+
+describe("routeProbes with the capabilities check", () => {
+  const probe = (over: Partial<ProbeResult>): ProbeResult => ({
+    probe: "repository",
+    hit: false,
+    score: null,
+    summary: "",
+    evidence: null,
+    latencyMs: 0,
+    ...over,
+  });
+  const miss = (name: ProbeResult["probe"]): ProbeResult => probe({ probe: name, hit: false, score: 0 });
+
+  it("answers when a control for the capability exists elsewhere on the site", () => {
+    const results = [miss("docs"), miss("interface"), probe({ hit: true, score: 1 })];
+    expect(routeProbes(results)).toBe("answer");
+  });
+
+  it("hedges when only the repository's code mentions it", () => {
+    const results = [miss("docs"), miss("interface"), probe({ hit: true, score: null })];
+    expect(routeProbes(results)).toBe("hedge");
+    expect(routeProbes([miss("docs"), miss("interface"), probe({ hit: true, score: 0.25 })])).toBe("hedge");
   });
 });

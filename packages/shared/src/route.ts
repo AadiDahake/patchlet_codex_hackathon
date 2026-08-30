@@ -11,7 +11,9 @@ export type Thresholds = {
  * is already clear.
  *
  * - The documentation or the live page found it, so answer it.
- * - Only the repository found it, so it may exist but the user cannot be shown it: hedge.
+ * - The capabilities check found a control for it elsewhere on the site, so answer it: the
+ *   planner can route the user there.
+ * - Only the repository's code mentions it, so it may exist but the user cannot be shown it: hedge.
  * - Nothing found it, so absence is plausible. The caller then asks the verdict model to confirm
  *   before telling a user a feature does not exist.
  */
@@ -22,16 +24,25 @@ export function routeProbes(
   const docsThreshold = thresholds.docsThreshold ?? DEFAULT_THRESHOLDS.docsThreshold;
   const interfaceThreshold = thresholds.interfaceThreshold ?? DEFAULT_THRESHOLDS.interfaceThreshold;
 
+  const found = (probe: ProbeResult["probe"]): ProbeResult | undefined =>
+    results.find((candidate) => candidate.probe === probe);
+
+  // Each probe applies its own threshold and, for the documentation, reads the passage when the
+  // score alone cannot decide. Its `hit` is the decision; a score below the line is only ever
+  // a hit because the reading said so, and that is not overruled here.
   const hit = (probe: ProbeResult["probe"], threshold: number): boolean => {
-    const result = results.find((candidate) => candidate.probe === probe);
-    if (!result) return false;
-    if (!result.hit) return false;
-    return result.score === null || result.score >= threshold;
+    const result = found(probe);
+    if (!result || !result.hit) return false;
+    if (result.score === null) return true;
+    return result.score >= threshold || probe === "docs";
   };
 
   if (hit("docs", docsThreshold) || hit("interface", interfaceThreshold)) return "answer";
 
-  const repository = results.find((candidate) => candidate.probe === "repository");
+  // The capabilities check scores a control found elsewhere on the site, which the user can be
+  // walked to. Code alone carries no score, so it stays a hedge.
+  const repository = found("repository");
+  if (repository?.hit && repository.score !== null && repository.score >= interfaceThreshold) return "answer";
   if (repository?.hit) return "hedge";
 
   return "absent";
