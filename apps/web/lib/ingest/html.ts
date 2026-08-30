@@ -9,7 +9,7 @@
 
 /** Elements whose content is chrome or code rather than documentation. */
 const DROPPED =
-  /<(script|style|noscript|template|svg|canvas|iframe|nav|footer|header|aside|form|select)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+  /<(head|title|script|style|noscript|template|svg|canvas|iframe|nav|footer|header|aside|form|select)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 
 const ENTITIES: Record<string, string> = {
   amp: "&",
