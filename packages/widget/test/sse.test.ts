@@ -64,3 +64,65 @@ describe('toChatEvent', () => {
     });
   });
 });
+
+describe('toChatEvent with a route plan', () => {
+  const control = { role: 'link', name: 'Change seats', landmark: 'main', href: '/trips/:id/seats', route: '/trips/:id' };
+
+  it('keeps a later-page step that has no live id yet but names its control', () => {
+    const event = toChatEvent(
+      JSON.stringify({
+        type: 'answer',
+        text: 'ok',
+        steps: [
+          { target: 'a4', caption: 'Open My Booking', advanceOn: 'navigation' },
+          { target: null, caption: 'Open Change seats', advanceOn: 'navigation', control },
+          { target: null, caption: 'no identity', advanceOn: 'click' },
+        ],
+        escalation: { offered: false },
+      }),
+    );
+    expect(event).toMatchObject({
+      steps: [
+        { target: 'a4', caption: 'Open My Booking' },
+        { target: null, caption: 'Open Change seats', control },
+      ],
+    });
+    expect((event as { steps: unknown[] }).steps).toHaveLength(2);
+  });
+
+  it('drops the plan when the first step has no live id, because there is nothing to draw', () => {
+    const event = toChatEvent(
+      JSON.stringify({
+        type: 'answer',
+        text: 'ok',
+        steps: [{ target: null, caption: 'Open Change seats', advanceOn: 'navigation', control }],
+        escalation: { offered: false },
+      }),
+    );
+    expect(event).toMatchObject({ steps: null });
+  });
+
+  it('reads the plan summary, the sources and the route change', () => {
+    const event = toChatEvent(
+      JSON.stringify({
+        type: 'answer',
+        text: 'ok',
+        steps: [{ target: 'a1', caption: 'Open it', advanceOn: 'click' }],
+        escalation: { offered: false },
+        plan: { source: 'graph', total: 3, destination: { route: '/trips/:id', title: 'Manage Trip' } },
+        sources: [{ title: 'How do I change my seat?', url: '/help/how-do-i-change-my-seat' }, { title: '' }],
+        routeChanged: true,
+      }),
+    );
+    expect(event).toMatchObject({
+      plan: { source: 'graph', total: 3, destination: { route: '/trips/:id', title: 'Manage Trip' } },
+      sources: [{ title: 'How do I change my seat?', url: '/help/how-do-i-change-my-seat' }],
+      routeChanged: true,
+    });
+    const plain = toChatEvent(
+      '{"type":"answer","text":"ok","steps":null,"escalation":{"offered":false},"plan":{"source":"odd","total":"3"}}',
+    );
+    expect(plain).not.toHaveProperty('plan');
+    expect(plain).not.toHaveProperty('routeChanged');
+  });
+});

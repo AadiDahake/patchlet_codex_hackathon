@@ -41,6 +41,10 @@ export class Spotlight {
   private view: SpotlightView | null = null;
   private frame = 0;
   private open = false;
+  /** Layout can move the control without any scroll or resize: a panel opening above it, a
+      font loading, a row being added. Both observers feed the same throttled reposition. */
+  private resizeObserver: ResizeObserver | null = null;
+  private mutationObserver: MutationObserver | null = null;
 
   constructor(private readonly host: ShadowRoot, private readonly handlers: SpotlightHandlers) {
     const { root, hole, ring, bubble, counter, text, advance, stop } = build();
@@ -82,8 +86,11 @@ export class Spotlight {
     if (offscreen) {
       view.target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
     }
+    const previous = this.view?.target ?? null;
     this.view = view;
     this.counter.textContent = `Step ${view.index + 1} of ${view.total}`;
+    this.root.dataset.plStep = String(view.index + 1);
+    this.root.dataset.plTotal = String(view.total);
     this.text.textContent = view.caption;
     this.advance.textContent = view.isLast ? 'Done' : 'Next';
     this.advance.hidden = true;
@@ -93,12 +100,41 @@ export class Spotlight {
       showTopLayer(this.root);
       addEventListener('scroll', this.schedule, true);
       addEventListener('resize', this.schedule);
+      this.watchLayout();
     }
+    if (previous !== view.target) this.follow(view.target);
     this.reposition();
+  }
+
+  /** Follows the target's own box, so the ring moves when the control does. */
+  private follow(target: Element): void {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (typeof ResizeObserver === 'undefined') return;
+    this.resizeObserver = new ResizeObserver(() => this.schedule());
+    this.resizeObserver.observe(target);
+  }
+
+  /** Follows the page around the target, throttled to one frame however busy the host is. */
+  private watchLayout(): void {
+    if (typeof MutationObserver === 'undefined' || !document.body) return;
+    this.mutationObserver = new MutationObserver(() => this.schedule());
+    this.mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'],
+    });
   }
 
   hide(): void {
     this.view = null;
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    this.mutationObserver?.disconnect();
+    this.mutationObserver = null;
+    delete this.root.dataset.plStep;
+    delete this.root.dataset.plTotal;
     if (!this.open) return;
     this.open = false;
     hideTopLayer(this.root);

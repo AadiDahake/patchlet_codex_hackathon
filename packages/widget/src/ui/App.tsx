@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks';
 import type { ApiClient } from '../api/client';
-import { GuideMachine, type GuideSnapshot } from '../guide/machine';
+import { GuideMachine, type GuideSnapshot, type Replanned } from '../guide/machine';
 import { Spotlight } from '../guide/spotlight';
 import { watchPage } from '../guide/navigation';
+import { watchTransitions } from '../guide/transitions';
 import { scanAffordances, type ScanResult } from '../scan/affordances';
 import type { ChatEvent, EscalationStatus, EscalationView, FeedbackRating, Step } from '../types';
 import { VoicePlayer } from '../voice/player';
@@ -127,20 +128,26 @@ export function App({ client, shadow, host, position, register }: AppProps) {
         busy: snapshot.state !== 'SPOTLIGHTING',
       });
       if (snapshot.state === 'SPOTLIGHTING') {
-        setAnnouncement(`Step ${snapshot.stepIndex + 1} of ${snapshot.total}. ${snapshot.step.caption}`);
+        // A route change is said out loud: the count the user was given is no longer true.
+        const note = snapshot.message ? `${snapshot.message} ` : '';
+        setAnnouncement(`${note}Step ${snapshot.stepIndex + 1} of ${snapshot.total}. ${snapshot.step.caption}`);
       }
     },
     [],
   );
 
-  /** Re-asks the agent for the steps that are left, against the page as it is now. */
+  /**
+   * Re-asks the agent for the steps that are left, against the page as it is now. Only reached
+   * when a control is really missing; the answer says whether the route had to change.
+   */
   const replan = useCallback(
-    async (continueFrom: number) => {
+    async (continueFrom: number): Promise<Replanned | null> => {
       const guided = guidedRef.current;
       if (!guided) return null;
       const fresh = scan(guided.question);
       scanRef.current = fresh;
       let steps: Step[] | null = null;
+      let routeChanged = false;
       try {
         await client.ask({
           question: guided.question,
@@ -148,13 +155,15 @@ export function App({ client, shadow, host, position, register }: AppProps) {
           conversationId: conversationRef.current,
           continueFrom,
           onEvent: (event) => {
-            if (event.type === 'answer') steps = event.steps;
+            if (event.type !== 'answer') return;
+            steps = event.steps;
+            routeChanged = event.routeChanged === true;
           },
         });
       } catch {
         return null;
       }
-      return steps ? { ...fresh, steps } : null;
+      return steps ? { ...fresh, steps, routeChanged } : null;
     },
     [client, scan],
   );
@@ -419,6 +428,12 @@ export function App({ client, shadow, host, position, register }: AppProps) {
     recorder.cancel();
   }, [player, recorder]);
 
+  // The site graph learns from every visit: the page as scanned, and the moves the user makes.
+  useEffect(() => {
+    const watcher = watchTransitions(client, host);
+    return () => watcher.dispose();
+  }, [client, host]);
+
   /** Ends the turn: transcribe what was captured and ask it. */
   const finishRecording = useCallback(async () => {
     setRecording(false);
@@ -585,6 +600,8 @@ function applyEvent(turn: Turn, event: ChatEvent, conversationRef: { current: st
           steps: event.steps,
           escalation: event.escalation,
           noted: event.noted,
+          plan: event.plan,
+          sources: event.sources,
         },
       };
     case 'error':

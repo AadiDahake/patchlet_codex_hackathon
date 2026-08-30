@@ -8,7 +8,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "vite build && npm run postbuild",
+    "build": "vite build && vite build -c vite.scanner.config.ts && npm run postbuild",
     "postbuild": "node scripts/copy-dist.mjs",
     "dev": "concurrently -k -n build,mock -c cyan,magenta \"vite build --watch --mode development\" \"tsx dev/mock-api.ts\"",
     "mock": "tsx dev/mock-api.ts",
@@ -17,6 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@patchlet/shared": "*",
     "dom-accessibility-api": "^0.7.0",
     "preact": "^10.24.3"
   },

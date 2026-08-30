@@ -1,4 +1,14 @@
-import type { ChatEvent, EscalationOffer, FeatureRequest, ProbeName, ProbeResult, Step, Verdict } from '../types';
+import type {
+  AnswerSource,
+  ChatEvent,
+  EscalationOffer,
+  FeatureRequest,
+  PlanSummary,
+  ProbeName,
+  ProbeResult,
+  Step,
+  Verdict,
+} from '../types';
 
 /**
  * Incremental text/event-stream reader. Feed it decoded chunks; it returns the
@@ -86,15 +96,22 @@ export function toChatEvent(payload: string): ChatEvent | null {
       if (!isRecord(parsed.verdict)) return null;
       return { type: 'verdict', verdict: coerceVerdict(parsed.verdict) };
 
-    case 'answer':
+    case 'answer': {
       if (typeof parsed.text !== 'string') return null;
-      return {
+      const event: Extract<ChatEvent, { type: 'answer' }> = {
         type: 'answer',
         text: parsed.text,
         steps: coerceSteps(parsed.steps),
         escalation: toEscalationOffer(parsed.escalation),
         noted: parsed.noted === true,
       };
+      const plan = coercePlan(parsed.plan);
+      if (plan) event.plan = plan;
+      const sources = coerceSources(parsed.sources);
+      if (sources.length) event.sources = sources;
+      if (parsed.routeChanged === true) event.routeChanged = true;
+      return event;
+    }
 
     case 'error':
       return {
@@ -130,22 +147,72 @@ function coerceVerdict(value: Record<string, unknown>): Verdict {
 
 const ADVANCE_ON: readonly string[] = ['click', 'input', 'navigation', 'manual'];
 
+/** The identity a later-page step carries, when it is well formed. */
+function coerceControl(value: unknown): Step['control'] | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.role !== 'string' || typeof value.name !== 'string' || typeof value.route !== 'string') return null;
+  if (value.name.trim() === '' || value.route === '') return null;
+  const control: NonNullable<Step['control']> = { role: value.role, name: value.name, route: value.route };
+  if (typeof value.landmark === 'string' && value.landmark) control.landmark = value.landmark;
+  if (typeof value.href === 'string' && value.href) control.href = value.href;
+  return control;
+}
+
+/**
+ * Keeps the well-formed steps. A step on a later page has no live id yet and is kept on the
+ * strength of its identity alone; the first step is what the spotlight draws now, so it has to
+ * carry a live id or the whole plan is dropped.
+ */
 export function coerceSteps(value: unknown): Step[] | null {
   if (!Array.isArray(value)) return null;
   const steps: Step[] = [];
   for (const item of value) {
     if (!isRecord(item)) continue;
-    if (typeof item.target !== 'string' || typeof item.caption !== 'string') continue;
-    steps.push({
-      target: item.target,
+    if (typeof item.caption !== 'string') continue;
+    const control = coerceControl(item.control);
+    const target = typeof item.target === 'string' ? item.target : null;
+    if (target === null && !control) continue;
+    const step: Step = {
+      target,
       caption: item.caption,
       advanceOn:
         typeof item.advanceOn === 'string' && ADVANCE_ON.includes(item.advanceOn)
           ? (item.advanceOn as Step['advanceOn'])
           : 'click',
-    });
+    };
+    if (control) step.control = control;
+    steps.push(step);
   }
-  return steps.length ? steps : null;
+  if (steps.length === 0 || steps[0].target === null) return null;
+  return steps;
+}
+
+const PLAN_SOURCES: readonly string[] = ['graph', 'cached', 'page'];
+
+function coercePlan(value: unknown): PlanSummary | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.total !== 'number' || !Number.isFinite(value.total)) return null;
+  const plan: PlanSummary = {
+    source: typeof value.source === 'string' && PLAN_SOURCES.includes(value.source) ? (value.source as PlanSummary['source']) : 'page',
+    total: Math.max(0, Math.round(value.total)),
+  };
+  if (isRecord(value.destination) && typeof value.destination.route === 'string') {
+    plan.destination = {
+      route: value.destination.route,
+      title: typeof value.destination.title === 'string' ? value.destination.title : '',
+    };
+  }
+  return plan;
+}
+
+function coerceSources(value: unknown): AnswerSource[] {
+  if (!Array.isArray(value)) return [];
+  const sources: AnswerSource[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.title !== 'string' || item.title.trim() === '') continue;
+    sources.push({ title: item.title, url: typeof item.url === 'string' && item.url ? item.url : null });
+  }
+  return sources;
 }
 
 /** The offer, or the reason there was none. Anything unrecognised reads as a plain refusal. */
