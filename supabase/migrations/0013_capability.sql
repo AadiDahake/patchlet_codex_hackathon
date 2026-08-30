@@ -7,7 +7,7 @@
 -- pipeline from "the turn ended absent" to "the specification is stored" (`discovery`).
 --
 -- `candidate` and `deployment_outcome` are migration 0014's. The foreign keys that point from
--- 0014's columns at `capability_spec` live in migration 0015, so the schema is the same whether
+-- 0014's columns at `capability_spec` live in migration 0017, so the schema is the same whether
 -- this file ran before or after 0014.
 
 -- Behavioural evidence for one opportunity, mined from PostHog. One row per session.

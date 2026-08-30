@@ -188,7 +188,7 @@ create table deployment_outcome (
 -- Migration 0014 also adds to escalation:
 --   capability_spec_id uuid            -- the compiled specification the run built
 --   winning_candidate_id uuid references candidate on delete set null
--- Migration 0015 adds the foreign keys from candidate.capability_spec_id and
+-- Migration 0017 adds the foreign keys from candidate.capability_spec_id and
 -- escalation.capability_spec_id to capability_spec (on delete set null).
 
 -- Behavioural evidence for one opportunity, mined from PostHog (migration 0013). One row per
