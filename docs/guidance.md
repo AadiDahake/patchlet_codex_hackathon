@@ -145,6 +145,28 @@ embedding; a new wording is matched by the embedding the documentation check nee
 0.92 or above. On a hit the route is planned from the current page and the answer is streamed at
 once. This is ToolCUA's move: a repeated procedure becomes one call, `navigate_to(change_seats)`.
 
+An exact hit is served before the message is read, because the same concepts in a question that
+already resolved to a control on this site is the same question. The read is in flight, as on
+every turn, and its answer is simply not needed. The looser embedding match waits for the read,
+so a message that turns out to be small talk can never be answered with somebody else's walk.
+
+### Not every message is a question about the product
+
+The message is classified before anything is searched (`apps/web/lib/agent/understand.ts`, and
+the table in section 4 of `docs/contracts.md`). A greeting, a question about the assistant and a
+piece of general knowledge are `chat` and are answered from the model in a sentence or two; a
+question the page already answers is `page` and is answered from the page's own text and its
+controls; only `product` and `mixed` run the three checks, the verdict and the absence path.
+Before this, every message ran the absence pipeline, so "Hello, can you hear me?" came back as an
+apology for a missing feature and an offer to report it to the developers.
+
+Three rules keep it safe. A `chat` or `page` answer never names a control the scan did not send
+and never claims the product does anything; a capability is only ever asserted from a probe hit;
+and anything the classifier is unsure of is `mixed`, which still checks its evidence before it
+speaks. The page's own words reach the server because the scan sends them: `visibleText` in
+`packages/widget/src/scan/text.ts` collapses the rendered text of the host page, skips the
+widget's own host and anything hidden, and bounds it at 2000 characters.
+
 ### Binding on navigation
 
 The widget binds each step by stable identity, on every scan. After a navigation it rescans,
@@ -180,7 +202,8 @@ control found elsewhere on the site routes the turn to `answer`; code alone stay
 
 All against NovaAir in development mode on this machine, with Patchlet in development mode, the
 project's graph explored and its help center imported. Numbers come from `npm run e2e:guide`
-(`e2e/guide.spec.ts`), from `trace_event` rows, and from `npm run eval:docs`.
+(`e2e/guide.spec.ts`), from `trace_event` rows, from `npm run eval:docs`, and from posting to
+`POST /api/chat` against the running stack.
 
 ### The walk
 
@@ -195,10 +218,32 @@ project's graph explored and its help center imported. Numbers come from `npm ru
   target and wrote the captions, plus one reading of the documentation passage when its score
   falls in the band that a number alone cannot decide.
 - Time to the first spotlight, known route (the same question from the Manage Trip page): 943,
-  987 and 1103 ms over three runs (target under 1.5 s). Zero model calls; one row lookup and one
-  graph read.
+  987 and 1103 ms over three runs (target under 1.5 s). One row lookup and one graph read; the
+  answer waits on no model.
 - On navigation the widget bound the next step by identity from its own scan; no `continueFrom`
   request was made during the successful walk.
+
+### Intent routing
+
+Measured on 2026-08-29 against the running stack (Patchlet in development mode on this machine,
+a project with 15 pages, 501 controls and six help articles), by posting to `POST /api/chat` and
+reading the stream.
+
+- The 16 fixture messages in `apps/web/test/fixtures/intents.ts`, four of each class, are
+  classified correctly by `MODELS.understand` in five consecutive runs of
+  `apps/web/test/understand.live.test.ts`: 16 of 16 each time, 1.3 to 1.8 s for all sixteen in
+  parallel. The suite skips itself without `OPENAI_API_KEY`, so CI stays offline.
+- "Hello, can you hear me?" now answers "Hello! Yes, I can hear you. How can I help?" in 2.4 to
+  4.5 s, with no probe, no verdict and no offer to report anything. Before, it ran the three
+  checks and came back with an apology for a missing feature.
+- "What time does my flight leave?" on Manage Trip answers "Your flight departs at 22:40." from
+  the page's own text in 2.4 s. On a page that does not say, the answer says so and invites the
+  question the product path answers, rather than ending in a dead end.
+- "Where do I change my seat?" from the home page is unchanged: three probes, verdict `answer`,
+  a three-step route over the product map, in 7.2 s server-side including the documentation
+  search and the resolution.
+- The same question again, from the same page: 350, 550 and 830 ms, served from the product map
+  before the read comes back.
 
 ### The explorer
 
