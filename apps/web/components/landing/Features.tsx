@@ -1,4 +1,3 @@
-import { Eyebrow } from "./Eyebrow";
 import { Reveal } from "./Reveal";
 
 const FEATURES = [
@@ -30,11 +29,10 @@ const FEATURES = [
 
 export function Features() {
   return (
-    <section id="features" className="border-t border-line/60 py-28 lg:py-36">
+    <section id="features" className="border-t border-line/60 py-24 lg:py-32">
       <div className="mx-auto max-w-7xl px-6 lg:px-10">
-        <div className="mb-16 max-w-3xl">
-          <Eyebrow>What it does</Eyebrow>
-          <h2 className="mt-5 font-display text-4xl leading-[1.02] tracking-tight sm:text-5xl lg:text-[3.5rem]">
+        <div className="mb-14 max-w-3xl">
+          <h2 className="font-display text-4xl leading-[1.02] tracking-tight sm:text-5xl lg:text-[3.5rem]">
             Everything support <br />
             <span className="font-medium text-accent italic">should</span> be.
           </h2>
@@ -47,11 +45,7 @@ export function Features() {
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((feature, index) => (
             <Reveal key={feature.title} delay={index * 80} className="h-full">
-              <div className="group relative h-full overflow-hidden rounded-2xl border border-line/60 bg-[var(--glass-soft)] p-7 shadow-[var(--glass-highlight)] backdrop-blur-[30px] transition-all duration-500 hover:-translate-y-1 hover:border-accent/30 hover:shadow-[var(--shadow)]">
-                <span
-                  aria-hidden
-                  className="absolute top-7 bottom-7 left-0 w-[2px] bg-accent/30 transition-colors group-hover:bg-accent"
-                />
+              <div className="h-full rounded-2xl border border-line/60 bg-surface/70 p-7">
                 <h3 className="mb-2 font-display text-[1.35rem] tracking-tight">{feature.title}</h3>
                 <p className="text-[14.5px] leading-relaxed text-ink/65">{feature.body}</p>
               </div>

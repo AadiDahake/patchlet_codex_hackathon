@@ -10,8 +10,8 @@
  */
 :root {
   --ink: #17201c;
-  --muted: #68716c;
-  --faint: #8b9089;
+  --muted: #5b645f;
+  --faint: #656e69;
   --paper: #f6f2e9;
   --surface: #ebe7dc;
   --panel: #fffdf7;
@@ -27,14 +27,14 @@
   --accent-hover-soft: rgba(46, 111, 84, 0.08);
   --accent-ring: rgba(46, 111, 84, 0.18);
   --accent-shadow: 0 16px 34px -22px rgba(46, 111, 84, 0.7);
-  --faint-ring: rgba(139, 144, 137, 0.16);
+  --faint-ring: rgba(101, 110, 105, 0.16);
   --sage: #8fbf9f;
 
   /* Type on the deep accent panels (the sign-in brand column, the embed block). */
   --on-deep: #f2efe6;
   --on-deep-2: rgba(242, 239, 230, 0.85);
   --on-deep-3: rgba(242, 239, 230, 0.76);
-  --on-deep-4: rgba(242, 239, 230, 0.55);
+  --on-deep-4: rgba(242, 239, 230, 0.74);
   --wash-sage-deep: rgba(143, 191, 159, 0.22);
   --wash-sage-deep-2: rgba(143, 191, 159, 0.12);
 
@@ -64,7 +64,7 @@
   --blur: 30px;
 
   /* The soft washes behind the page, which the glass blurs. */
-  --wash-green: rgba(143, 191, 159, 0.3);
+  --wash-green: rgba(143, 191, 159, 0.26);
   --wash-moss: rgba(46, 111, 84, 0.16);
   --wash-warm: rgba(214, 196, 160, 0.34);
 
@@ -948,24 +948,6 @@ body::before {
 
 /* --- Landing motion --------------------------------------------------------------- */
 
-@keyframes pl-pulse-soft {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.85;
-    transform: scale(1.03);
-  }
-}
-
-@keyframes pl-dash-flow {
-  to {
-    stroke-dashoffset: -40;
-  }
-}
-
 @keyframes pl-marquee {
   from {
     transform: translateX(0);
@@ -973,15 +955,6 @@ body::before {
   to {
     transform: translateX(-50%);
   }
-}
-
-@utility animate-pulse-soft {
-  animation: pl-pulse-soft 3s ease-in-out infinite;
-}
-
-@utility animate-dash {
-  stroke-dasharray: 6 6;
-  animation: pl-dash-flow 1.4s linear infinite;
 }
 
 @utility animate-marquee {
@@ -1033,14 +1006,6 @@ body::before {
   color: var(--accent-deep);
 }
 
-.pipeline__index {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  opacity: 0.55;
-}
-
 .pipeline__label {
   font-size: 0.95rem;
   font-weight: 600;
@@ -1077,23 +1042,55 @@ body::before {
   border-top: 1px solid var(--hairline);
   list-style: none;
   color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 0.95rem;
+  font-weight: 500;
 }
 
-/* Hand-drawn underline under the emphasised words in the hero headline. Painted as a background
-   image so it reflows with the text; box-decoration-break redraws it on every wrapped line. */
-.hero-underline {
-  /* The stroke is the accent, spelled as its hex because a data URI cannot read a token. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 12' preserveAspectRatio='none'%3E%3Cpath d='M2 8C40 3 90 3 130 5c25 1 45 2 68 1' fill='none' stroke='%232e6f54' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: 0 92%;
-  background-size: 100% 0.32em;
-  padding-bottom: 0.06em;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
+/* --- Product captures --------------------------------------------------------------- */
+
+/*
+ * A real capture of the product, with its caption on a frosted chip that overlaps the image's
+ * bottom edge: the one place on the landing page where glass sits over something.
+ */
+.product-shot {
+  position: relative;
+  margin: 0;
+}
+
+.product-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow-lift);
+}
+
+.product-shot__caption {
+  position: absolute;
+  bottom: -18px;
+  left: 28px;
+  max-width: calc(100% - 56px);
+  padding: 10px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--glass-strong);
+  box-shadow: var(--glass-highlight), var(--shadow);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+  .product-shot__caption {
+    position: static;
+    display: block;
+    max-width: none;
+    margin-top: 12px;
+    border-radius: 14px;
+  }
 }
 
 /* --- Live trace ------------------------------------------------------------------- */
@@ -1320,7 +1317,7 @@ body::before {
 
 .trace-row__kind {
   color: var(--accent);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
