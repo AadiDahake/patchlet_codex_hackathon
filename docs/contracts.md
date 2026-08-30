@@ -840,10 +840,14 @@ what it may answer:
   so explicitly. A second empty answer raises with the model's own summary in the message, so the
   trace records why. See "An approved request outranks the target repository's premise" in
   `docs/architecture.md`.
-- **The gates are the target repository's own.** `npm ci` (cached by lockfile hash), then
-  `npm run typecheck`, then `npm run build`, in the clone with the drafted files applied and the
-  planned deletions removed. A failure goes back to the editor for the files the output names, up to
-  3 repairs, then a fresh candidate, up to 2 candidates.
+- **The gates are the target repository's own.** `npm ci` (cached by lockfile hash), then every
+  script in `GATES` that the target's `package.json` defines, cheapest first: `npm run typecheck`,
+  `npm test`, `npm run build`, in the clone with the drafted files applied and the planned deletions
+  removed. A failure goes back to the editor for the files the output names, up to 3 repairs, then a
+  fresh candidate, up to 2 candidates. `npm test` earns its place: a draft passed typecheck and build
+  and still broke NovaAir's `tests/seat-party.test.ts`, adding the two exports that repository
+  documents with a signature the contract test does not call. `e2e` is never a gate, because it needs
+  a browser and a running server.
 - **The pull request body** names the request, the user's quote, the count line
   (`Requested N times, M by users`), every changed file and every deleted one.
 - **The trace ends on the pull request and the pause.** `open_draft_pr` writes the gate comment and

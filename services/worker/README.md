@@ -21,7 +21,8 @@ For one escalation it:
 3. **Drafts the implementation.** One editor call per written file (existing contents supplied
    verbatim, whole-file output); a planned deletion needs no model call. Applies the files and the
    deletions in the clone, then runs the gates: `npm ci` (cached `node_modules` under
-   `~/.cache/patchlet/<repo>` keyed by the lockfile hash), `npm run typecheck`, `npm run build`. On
+   `~/.cache/patchlet/<repo>` keyed by the lockfile hash), then every gate the target's
+   `package.json` defines, cheapest first: `npm run typecheck`, `npm test`, `npm run build`. On
    failure the gate output goes back to the editor for the affected file (up to 3 repairs), then a
    fresh candidate is drafted (up to 2 candidates).
 4. **Opens a draft pull request** on `patchlet/<issue>-<slug>` with one commit
@@ -129,8 +130,12 @@ first run installs the fixture's dependencies (about a minute); later runs reuse
   on the target repository. Issues and pull requests need their own permissions too.
 - **`npm ci failed`** - the cache under `~/.cache/patchlet/<repo>` is keyed by the lockfile hash;
   delete that directory to force a clean install. The gates need network access on the first run.
-- **`npm run build` fails in the repair loop** - the trace shows the gate output and every repair.
-  The run gives up after 2 candidates with 3 repairs each and marks the escalation `failed`.
+- **A gate fails in the repair loop** - the trace shows the gate output and every repair. The run
+  gives up after 2 candidates with 3 repairs each and marks the escalation `failed`.
+- **`npm test` runs against the target repository, not this one.** It is a gate because typecheck
+  and build are not enough: a draft passed both and still broke NovaAir's own contract test, having
+  added the documented exports with a signature the test does not call. `e2e` is never a gate, as it
+  needs a browser and a running server.
 - **No deployment found after 10 minutes** - the Vercel project is not linked to the repository, or
   `TARGET_VERCEL_PROJECT` names a different project. The worker matches `meta.githubCommitSha` to
   the squash-merge commit. The run stops with a `status` trace event and leaves the row `deploying`
