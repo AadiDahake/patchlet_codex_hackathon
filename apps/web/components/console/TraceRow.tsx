@@ -126,6 +126,7 @@ const CAPABILITY_KEYS = [
   "sessions",
   "steps",
   "goals",
+  "grades",
   "kept",
   "successful",
   "signature",
@@ -142,11 +143,29 @@ const CAPABILITY_KEYS = [
   "errors",
 ];
 
+/** "seat_party_together: 7, change_one_seat: 1" - a list of objects counted by one of their keys. */
+function countedBy(items: unknown[], key: string): string | null {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const value = (item as Record<string, unknown> | null)?.[key];
+    if (typeof value !== "string" && typeof value !== "number") return null;
+    counts.set(String(value), (counts.get(String(value)) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([name, n]) => `${name}: ${n}`).join(", ");
+}
+
 function brief(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
   if (Array.isArray(value)) {
-    return value.map((item) => (typeof item === "object" && item !== null ? JSON.stringify(item) : String(item))).join(", ") || "-";
+    if (value.length === 0) return "-";
+    if (value.every((item) => typeof item !== "object" || item === null)) return value.map(String).join(", ");
+    // A batch of goals reads as one count per goal; a batch of grades as one count per grade.
+    return (
+      countedBy(value, "goal_name") ??
+      (countedBy(value, "completion") ? `completion ${countedBy(value, "completion")}; coherence ${countedBy(value, "coherence")}` : null) ??
+      `${value.length} entries`
+    );
   }
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);

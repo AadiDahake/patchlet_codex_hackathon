@@ -3563,6 +3563,7 @@ body::before {
 
 .opp-outcome__block {
   display: grid;
+  align-content: start;
   gap: 8px;
   padding: 14px 16px;
   border: 1px solid var(--hairline);
