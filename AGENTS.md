@@ -67,6 +67,21 @@ makes every test in the package run offline against `test/fixtures/sessions.json
 `npm run compile -- --fixtures` demonstrable with no key and no database. The four stages, the
 research each one credits, and the IR fields are in `docs/capability-compiler.md`.
 
+## The opportunity pipeline
+
+`apps/web/lib/opportunity` is what runs between the absence verdict and the forge engine: mine the
+sessions from PostHog, compile the Capability IR, store it, and tell the chat how many others hit
+the gap. Three rules, all in `docs/opportunities.md`:
+
+- A request enqueues a `discovery` row and answers at once; it never runs the pipeline before the
+  response. `DISCOVERY_MODE` decides whether this process runs the row afterwards (`inline`, a
+  laptop) or `npm run discover:runner` does (`runner`, a host that caps requests). Statuses are
+  `queued`, `running`, `done`, `failed`; one active row per group.
+- `apps/web/lib/posthog` is the only module that holds the PostHog personal API key. Every query
+  is named, filters the window first and scans `events` once; `OFFSET` is never used.
+- The pipeline's trace rows carry `source: "forge"` and the group id, and the two lines the chat
+  shows carry `source: "agent"` on the conversation. `npm run tail` renders the same stream.
+
 ## The forge engine
 
 `apps/web/lib/forge` is the only place that knows Reflex and Runloop exist. The engine
@@ -185,6 +200,8 @@ node scripts/screenshots.mjs pages <dir> name=url...   # 1440x900 captures, priv
 npm run seed:site    # explore the project's site into the product map and import its help center
 npm run eval:docs    # the offline set that tunes the documentation check, against a running site
 npm run e2e:guide    # the guided walk on NovaAir, against the widget's mock API or a running stack
+npm run discover:runner -- --once     # drain the discovery queue; --model codex compiles on the saved Codex login
+PATCHLET_CONSOLE_TOKEN=... npm run tail   # the evidence loop as a board in the terminal
 ```
 
 Screenshots come from `scripts/screenshots.mjs` (Playwright, one private browser per run), never

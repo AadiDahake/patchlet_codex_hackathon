@@ -78,8 +78,9 @@ explicit event contract. When the three checks prove a feature is absent, Patchl
 question: is this one person, or a pattern? It queries PostHog's HogQL endpoint for historical
 sessions with similar behaviour and pulls the matching recordings, which gives one row per session
 with its ordered steps. That is the raw material: real people already achieving the goal the hard
-way. The mining query and the PostHog client are the design for `apps/web/lib/posthog`, being
-built on a parallel branch; the compiler already consumes the row shape it returns.
+way. The mining query and the PostHog client are `apps/web/lib/posthog`; the pipeline that runs
+them and the compiler for one request group is `apps/web/lib/opportunity`, enqueued by the turn
+that ended `absent` and executed off the request (`docs/opportunities.md`).
 
 **2. Inferred intent.** `packages/capability` reads each session as a demonstration and recovers
 the goal behind it, following OS-Genesis reverse task synthesis. Every step becomes one line of
@@ -182,6 +183,12 @@ Accepting the offer inserts an `escalation` row for the engine named by `ESCALAT
   `503 {error, reason: "engine_unavailable"}` and writes nothing when the selected strategy has no
   keys. The engine, its three strategies (Reflex, Runloop, local) and its trust boundary are in
   `docs/forge.md`.
+
+Between the verdict and the engine sits the opportunity pipeline (`apps/web/lib/opportunity`):
+a `discovery` row per request group, enqueued by the request and executed by the runner
+(`npm run discover:runner`) or after the response, that mines the sessions from PostHog and
+compiles the Capability IR the engine builds from. The console's Opportunities page shows the
+whole path for one group, in story order.
 
 The dashboard never needs to know which engine ran. Every engine writes the same statuses and the
 same trace events, so the console renders them identically.

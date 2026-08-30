@@ -133,9 +133,10 @@ create table trace_event (
   project_id uuid not null references project on delete cascade,
   conversation_id uuid references conversation on delete cascade,
   escalation_id uuid references escalation on delete cascade,
-  source text not null,                    -- 'agent' | 'workflow'
+  source text not null,                    -- 'agent' | 'workflow' | 'forge'
   kind text not null,                      -- 'probe' | 'verdict' | 'decision' | 'model'
                                            -- | 'tool' | 'artifact' | 'pause' | 'status' | 'error'
+                                           -- | 'capability' | 'candidate' | 'preview'
   status text not null default 'ok',       -- 'running' | 'ok' | 'failed'
   title text not null,
   detail jsonb,                            -- free-form, rendered per kind, see section 3
@@ -185,8 +186,73 @@ create table deployment_outcome (
 );
 
 -- Migration 0014 also adds to escalation:
---   capability_spec_id uuid            -- the compiled specification the run built (no FK yet)
+--   capability_spec_id uuid            -- the compiled specification the run built
 --   winning_candidate_id uuid references candidate on delete set null
+-- Migration 0015 adds the foreign keys from candidate.capability_spec_id and
+-- escalation.capability_spec_id to capability_spec (on delete set null).
+
+-- Behavioural evidence for one opportunity, mined from PostHog (migration 0013). One row per
+-- session; unique per group, so a re-run of the miner is idempotent.
+create table trajectory (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  group_id uuid not null references feature_request_group on delete cascade,
+  session_id text not null,                -- PostHog's $session_id
+  distinct_id text,
+  started_at timestamptz not null, ended_at timestamptz,
+  step_count int not null default 0,
+  steps jsonb not null,                    -- the ordered [{t, event, props}] list the compiler consumes
+  inferred_goal text, goal_name text, goal_confidence real,   -- OS-Genesis reverse task synthesis
+  reward_completion real, reward_coherence real,              -- the two reward axes, never averaged
+  replay_url text,                         -- the PostHog replay deep link; null when no recording exists
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (group_id, session_id)
+);
+
+-- The compiled Capability IR (migration 0013). One row per version; the console reads the latest.
+create table capability_spec (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  group_id uuid not null references feature_request_group on delete cascade,
+  intent text not null,                    -- snake_case, e.g. seat_party_together
+  version int not null default 1,
+  spec jsonb not null,                     -- the whole IR, validated against capability-ir.schema.json
+  summary text,
+  scenario_count int not null default 0,
+  session_count int not null default 0,
+  median_manual_actions real,              -- the compiler's count: every manual step, scanning included
+  median_interactions real,                -- the product's count: seat clicks, refused clicks, passenger picks
+  replaces_atomic_steps real,              -- ToolCUA: manual steps one call replaces, by median
+  model text,
+  created_at timestamptz not null default now(),
+  unique (group_id, version)
+);
+
+-- One run of the opportunity pipeline against a group (migration 0013): mine, then compile.
+-- Enqueued by the request that noticed the gap, executed by the runner or after the response.
+create table discovery (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  group_id uuid not null references feature_request_group on delete cascade,
+  conversation_id uuid references conversation on delete set null,  -- the chat that triggered it
+  trigger text not null default 'auto',    -- auto | user | manual
+  status text not null default 'queued',   -- queued | running | done | failed
+  stage text,                              -- mining | compiling, while running
+  decision text,                           -- capability | none, once done
+  reasons jsonb,                           -- why no capability was warranted
+  session_count int, median_manual_actions real, median_interactions real,
+  capability_spec_id uuid references capability_spec on delete set null,
+  error text,
+  claimed_by text, claimed_at timestamptz, finished_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+-- At most one run per group is queued or running: a partial unique index on (group_id).
+-- claim_discovery(worker text) claims the oldest queued row atomically (for update skip locked).
+
+-- Migration 0013 also adds to trace_event:
+--   group_id uuid references feature_request_group on delete set null   -- the opportunity a row belongs to
 
 -- What the agent remembers about one anonymous visitor (migration 0006). Nothing sensitive is
 -- stored here: no emails, phone numbers, keys or passwords.
@@ -452,6 +518,7 @@ export type TraceEvent = {
   projectId: string;
   conversationId: string | null;
   escalationId: string | null;
+  groupId: string | null;                   // the opportunity the row belongs to, when known
   source: "agent" | "workflow" | "forge";   // forge is the sandbox engine's lane
   kind:
     | "probe" | "verdict" | "decision" | "model" | "tool" | "artifact" | "pause" | "status" | "error"
@@ -462,6 +529,31 @@ export type TraceEvent = {
   title: string;
   detail: unknown;
   createdAt: string;
+};
+```
+
+Also exported, for the opportunity pipeline (`packages/shared/src/opportunity.ts`):
+
+```ts
+export type DiscoveryStatus = "queued" | "running" | "done" | "failed";
+export type DiscoveryTrigger = "auto" | "user" | "manual";
+export type Discovery = {
+  id; groupId; conversationId; trigger; status; stage: "mining" | "compiling" | null;
+  decision: "capability" | "none" | null; reasons: string[];
+  sessionCount; medianManualActions; medianInteractions; capabilitySpecId; error;
+  createdAt; updatedAt; finishedAt;
+};
+// Derived from the rows, never stored, in story order.
+export type OpportunityStatus =
+  | "discovering" | "not_warranted" | "failed" | "discovered"
+  | "building" | "verified" | "pr_open" | "merged" | "measured";
+export type OpportunitySummary = {
+  groupId; title; intent; status; sessionCount; medianManualActions; medianInteractions;
+  scenarioCount; specVersion; reportCount; prUrl; escalationId; updatedAt;
+};
+export type DeploymentOutcome = {
+  id; measuredAt; windowDays; eligibleUsers; featureUsed; featureSucceeded;
+  medianActionsBefore; medianActionsAfter; supportChangePct; source: "seeded" | "posthog";
 };
 ```
 
@@ -494,6 +586,10 @@ cookie, returns the project that account owns (creating one if it has none), and
 {error}` when there is no session. Every query in a console route is scoped to that project id, so
 one account can never read another's sources, conversations, escalations or trace.
 
+A terminal client (`npm run tail`) has no cookie. When `PATCHLET_CONSOLE_TOKEN` is set, a request
+with `Authorization: Bearer <token>` resolves to the project whose slug is
+`PATCHLET_CONSOLE_PROJECT` (default `novaair`). Off unless the token is set; a session always wins.
+
 | Route | Body / query | Returns |
 |---|---|---|
 | `POST /api/chat` | `{key, conversationId?, visitorId?, question, page: PageContext, continueFrom?}` | SSE of `ChatEvent`; each `data:` line is one JSON event, `event:` is its type. With `continueFrom`, one `answer` event with the remaining steps from the current page and `routeChanged` |
@@ -519,7 +615,11 @@ one account can never read another's sources, conversations, escalations or trac
 | `POST /api/opportunities/:groupId/forge` | `{spec?: CapabilityIr}`; without `spec` the group's latest `capability_spec` row is used | `202 {escalationId, status: "queued"}`; `409 {error, reason: "no_capability_spec" \| "no_github_token"}`; `503 {error, reason: "engine_unavailable"}` when the selected strategy has no keys; `400 {error, reason: "invalid_spec"}` |
 | `GET /api/forge/:escalationId` | - | `{escalation: {id, engine, status, prUrl, prNumber, branch, deploymentUrl, winningCandidateId, capabilitySpecId, approval, error, createdAt, updatedAt}, candidates: Candidate[]}` (the `candidate` row, camel-cased) |
 | `GET /api/forge/:escalationId/preview` | - | `{url: string \| null, candidate: "A" \| "B" \| null}`; the URL is rebuilt from the winner's handle and health-checked on every read, `null` once the sandbox is gone |
-| `GET /api/trace/stream` | `?since=&conversationId=&escalationId=` | SSE; `id:` is the `trace_event.id`, `event: trace`, `data: TraceEvent` |
+| `GET /api/opportunities` | - | `{opportunities: OpportunitySummary[]}`, newest activity first: every group with a discovery, a specification or a forge run |
+| `GET /api/opportunities/:groupId` | - | `{opportunity}`: the group, its status, the latest discovery, the latest specification with its IR, the evidence (counts, three representative sessions rendered as steps with replay links), the inferred intent with its reward distributions, the forge run with its candidates, and the latest outcome |
+| `POST /api/opportunities/:groupId/discover` | - | `202 {discoveryId, status, created}`; enqueues a run of the pipeline and answers at once. `created: false` when one was already queued or running. `503 {error, reason: "posthog_unavailable"}` without the PostHog variables |
+| `POST /api/opportunities/:groupId/measure` | - | `{outcome: DeploymentOutcome}` from the outcome query; `409 {reason: "no_capability_spec" \| "no_outcome_events"}` |
+| `GET /api/trace/stream` | `?since=&conversationId=&escalationId=&groupId=` | SSE; `id:` is the `trace_event.id`, `event: trace`, `data: TraceEvent` |
 | `GET /api/trace` | same filters, `?since=&limit=` | `{events: TraceEvent[]}` backfill |
 | `POST /api/auth/signup` | `{email, password, company}` | creates the account already confirmed through the Supabase admin API; the browser then signs in with the password |
 | `GET /api/github/connect` | - | redirects to GitHub's authorize page with `scope=repo` and a signed state cookie |
@@ -556,9 +656,16 @@ The console renders these specially and falls back to a key/value list for anyth
 | `candidate` | `{candidate: "A" \| "B", strategy}` while provisioning and building; `{candidate, scenarios_passed, scenarios_total, failing: [scenario id], runner: {passed, failed, total, success} \| null, files_changed}` when scored |
 | `preview` | `{url, candidate, port, sandbox}` |
 | `capability` | one `CompilerEvent` from `@patchlet/capability`: `{stage, title, detail, at}`; the `Chosen:` event's detail carries `rejected_too_low`, `rejected_too_high` and `coverage` |
+| `artifact` (pipeline) | `"capability_spec"` -> `{id, version, intent, summary, session_count, median_manual_actions, median_interactions, scenarios, constraints, actions, opportunity_id}`; `"replays"` -> `{linked, checked, failed}`; `"outcome"` -> `{source, intent, eligible, used, succeeded, median_actions_before, median_actions_after, support_before, support_after, support_change_pct}` |
+| `tool` (pipeline) | `{tool: "hogql", transport: "rest", args_summary, result_summary, sessions, matching_sessions, median_manual_actions, median_interactions, window_days, queries: [{name, rows, durationMs, cached}]}` |
 
 Forge rows carry `source: "forge"`; the persona's `tool`, `artifact` and `model` rows are titled
 `<Persona> (<candidate>): ...`, and a `file_change` artifact is `{artifact: "file_change", files: [{path, kind}]}`.
+
+The opportunity pipeline's rows (`docs/opportunities.md`) also carry `source: "forge"` and the
+group id. Two rows land on the conversation that triggered the run with `source: "agent"`: the
+`status` "Checking whether other customers hit this" when the run is enqueued, and the `decision`
+"63 similar sessions worked around this by hand" (or its negative) when it finishes.
 
 ## 4. Agent behaviour
 
@@ -669,6 +776,12 @@ to be reported or not, goes through `apps/web/lib/agent/requests.ts` first:
 A project with no repository bound still accumulates the group and its counts; there is simply
 nowhere to file it, so no run starts.
 
+A turn that ends `absent`, and a report through `POST /api/escalate`, also enqueue one discovery
+for the group (`apps/web/lib/opportunity/queue.ts`): the second question, is this one person or a
+pattern, answered from PostHog off the request. Once per group; a group with a finished run is
+left alone, and the console's button is the way to run it again. Nothing about it can fail the
+turn or the report.
+
 `POST /api/escalate` resolves the message's request, joins its group as a user report, writes a
 trace event recording that the user accepted, and starts whatever run `actionFor` chose. It returns
 the run that owns the group when there is one, so a second reporter follows the same issue and pull
@@ -691,6 +804,8 @@ it links.
 | Answers, step plans, issue drafting, code planning | `gpt-5.6-sol` | "Flagship model for complex professional work". Issue text and a change plan both end up in a pull request a human reads, so this is where the strongest model earns its cost. |
 | Absence verdict | `gpt-5.6-terra` at effort `high` | "Balances intelligence and cost". The verdict is one judgement over three short summaries: it needs deliberation, not writing. Running the middle model at high effort buys the deliberation without the flagship price. |
 | Code generation | `gpt-5.6-sol` | The worker writes whole files that must pass the target repository's own typecheck and build. No Codex-branded model id is published on the models page, so the flagship general model does this work. |
+| Capability compiler: reverse task synthesis and the trajectory reward (chosen 2026-08-29) | `gpt-5.6-luna` at effort `low` | Batched, eight sessions per call, over prose the compiler already rendered: a small extraction per session, sixteen calls per opportunity. The cheapest model keeps a discovery under a minute. |
+| Capability compiler: the naming call (chosen 2026-08-29) | `gpt-5.6-sol` at effort `medium` | One call whose answer becomes the specification's name, signature, actions and proposed interface, and then a pull request a person reads. The flagship earns its cost here. |
 | Embeddings, 1536 dimensions | `text-embedding-3-small` | The current small embedding model. Its default width is 1536, which is what every vector column and both match functions are built around. |
 | Document reading (vision) | `gpt-5.6-terra` at effort `low` | Reading a scanned handbook needs vision and accuracy, not the flagship's reasoning. The middle model is the balance point, and one call reads a whole document. |
 | Speech to text | `gpt-transcribe` | The speech-to-text guide names it "the recommended model for transcribing recorded speech in its original language". |
@@ -773,7 +888,12 @@ to run the compiler with no key, is in `docs/capability-compiler.md`.
 
 ## 7. Environment
 
-Every variable is described in `.env.example` and read through `apps/web/lib/env.ts`. The forge
+Every variable is described in `.env.example` and read through `apps/web/lib/env.ts`. The
+evidence pipeline's: `POSTHOG_PERSONAL_API_KEY` (`query:read` and `session_recording:read`) and
+`POSTHOG_PROJECT_ID` make PostHog reachable, `POSTHOG_HOST` picks the region (default
+`https://us.posthog.com`), `POSTHOG_WINDOW_DAYS` bounds the miner (default 90);
+`DISCOVERY_MODE` (`inline` | `runner`, default by host) says who executes a queued discovery;
+`PATCHLET_CONSOLE_TOKEN` and `PATCHLET_CONSOLE_PROJECT` let a terminal read the console. The forge
 engine's: `ESCALATION_ENGINE=forge` selects it; `FORGE_STRATEGY` (`reflex` | `runloop` | `local`,
 default by the keys present) selects where candidates build; `REFLEX_API_KEY`,
 `REFLEX_ORG`, `REFLEX_API_URL` and `REFLEX_PERSONA_BUILDER`, `REFLEX_PERSONA_UX`, `REFLEX_PERSONA_VERIFIER` for Reflex;
