@@ -12,8 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Built by packages/widget and copied here; it is not source.
+    // Built by packages/widget and copied here; they are not source.
     "public/widget.js",
+    "public/scanner.js",
   ]),
 ]);
 
