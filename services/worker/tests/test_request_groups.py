@@ -34,6 +34,10 @@ def quiet(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     """Silence the database, the trace and Slack, and collect what they were told."""
     seen: dict[str, object] = {"slack": [], "escalation": [], "group": []}
     monkeypatch.setattr(db, "emit_trace", lambda *a, **k: None)
+    # The group has no issue yet and this run wins its issue slot, which is the ordinary case.
+    monkeypatch.setattr(db, "get_group", lambda group_id: {"id": group_id, "issue_number": None})
+    monkeypatch.setattr(db, "claim_issue_slot", lambda group_id, escalation_id: True)
+    monkeypatch.setattr(db, "release_issue_slot", lambda group_id, escalation_id: None)
     monkeypatch.setattr(trace, "issue_draft", lambda *a, **k: None)
     monkeypatch.setattr(trace, "issue", lambda *a, **k: None)
     monkeypatch.setattr(trace, "status", lambda *a, **k: None)

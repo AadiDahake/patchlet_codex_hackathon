@@ -38,6 +38,7 @@ import {
   type KnownRoute,
   type StoredGraph,
 } from "../graph/store";
+import { belongsToSite } from "../graph/origin";
 import { currentPageOf } from "./bind";
 import { answerChat, answerFromPage, answerFromPassage } from "./direct";
 import { loadVisitorFacts, rememberFromTurn } from "./memory";
@@ -60,10 +61,36 @@ function escalationOffer(request: FeatureRequest | null, repoFullName: string | 
   return repoFullName ? { offered: true, request } : { offered: false, reason: "no_repository" };
 }
 
+/**
+ * The repository this project files against, from the project row itself.
+ *
+ * "The team has not connected a repository yet" is a claim about the customer, not about this
+ * request, and the widget shows it as a fact. So it is only ever made from the binding the project
+ * carries: a turn started without the name, or with an empty one, reads it rather than assuming
+ * there is none. The read costs one round trip and only happens on the paths that draft a request.
+ */
+async function boundRepository(projectId: string, named: string | null): Promise<string | null> {
+  const hinted = named?.trim();
+
+  if (hinted) return hinted;
+  const { data } = await serviceClient()
+    .from("project")
+    .select("repo_full_name")
+    .eq("id", projectId)
+    .maybeSingle();
+  const bound = (data as { repo_full_name?: unknown } | null)?.repo_full_name;
+  return typeof bound === "string" && bound.trim() ? bound.trim() : null;
+}
+
 export type TurnInput = {
   projectId: string;
   repoFullName: string | null;
   defaultBranch: string;
+  /**
+   * Where this project's site lives. A page from any other origin answers the question but never
+   * joins the product map (`lib/graph/origin.ts`). Null means the project has not said yet.
+   */
+  siteUrl: string | null;
   question: string;
   page: PageContext;
   conversationId?: string;
@@ -406,8 +433,23 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   const graphPromise = loadGraph(projectId);
   graphPromise.catch(() => undefined);
 
+  // Only the site the project names teaches the product map. A preview deployment of an unmerged
+  // branch serves the same product on another origin, and one visit to it would otherwise put
+  // controls the live site has not got in front of the next visitor (`lib/graph/origin.ts`).
+  const ownSite = belongsToSite(input.siteUrl, page.url);
+  if (!ownSite) {
+    void emitTrace({
+      projectId,
+      conversationId,
+      kind: "decision",
+      title: "This page is not on the project's site, so nothing about it was recorded",
+      detail: { pageUrl: page.url, siteUrl: input.siteUrl },
+      source: "agent",
+    });
+  }
+
   const [, memory, known] = await Promise.all([
-    recordScan(projectId, page, "widget").catch(() => undefined),
+    ownSite ? recordScan(projectId, page, "widget").catch(() => undefined) : Promise.resolve(undefined),
     loadVisitorFacts(projectId, input.visitorId),
     findKnownRoute(projectId, intent).catch(() => null),
   ]);
@@ -526,16 +568,23 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   for (const probe of ["docs", "interface", "repository"] as const) {
     yield { type: "probe", probe, status: "running" };
   }
-  const [docs, ui, capabilities] = await Promise.all([
+  // What this project files against, read from the project row beside the checks. Both the
+  // capabilities check and the offer at the end speak about the customer's repository, so neither
+  // is decided by a value this turn happened to be started without.
+  const repository = boundRepository(projectId, input.repoFullName);
+  const [repoFullName, docs, ui, capabilities] = await Promise.all([
+    repository,
     probeDocs(`${question} ${understanding.feature}`, projectId, questionEmbedding, input.thresholds?.docsThreshold),
     Promise.resolve(probeInterface(question, page, understanding.feature)),
-    probeCapabilities(
-      projectId,
-      understanding.feature,
-      graph,
-      input.repoFullName,
-      input.defaultBranch,
-      input.thresholds?.interfaceThreshold,
+    repository.then((bound) =>
+      probeCapabilities(
+        projectId,
+        understanding.feature,
+        graph,
+        bound,
+        input.defaultBranch,
+        input.thresholds?.interfaceThreshold,
+      ),
     ),
   ]);
   const probes: ProbeResult[] = [docs, ui, capabilities];
@@ -691,15 +740,20 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
             },
             source: "agent",
           });
-          void saveKnownRoute(projectId, {
-            intent,
-            feature: understanding.feature,
-            question,
-            target,
-            answer: text,
-            sources,
-            embedding: await questionEmbedding.catch(() => null),
-          }).catch((error: unknown) => console.warn("known route not saved:", (error as Error).message));
+          // Remembered only when the page it was answered from is the project's own site: a route
+          // learned on a preview deployment would pin this question to a control the live site has
+          // not got.
+          if (ownSite) {
+            void saveKnownRoute(projectId, {
+              intent,
+              feature: understanding.feature,
+              question,
+              target,
+              answer: text,
+              sources,
+              embedding: await questionEmbedding.catch(() => null),
+            }).catch((error: unknown) => console.warn("known route not saved:", (error as Error).message));
+          }
         }
       }
       resolved = resolution.answer;
@@ -765,7 +819,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
       // user gets the offer rather than a dead end.
       text = resolved || `I could not find a way of ${understanding.feature} here.`;
       request = await draftRequest({ projectId, conversationId, question, memory });
-      text = `${text}${reportOffer("hedge", input.repoFullName)}`;
+      text = `${text}${reportOffer("hedge", repoFullName)}`;
       void emitTrace({
         projectId,
         conversationId,
@@ -783,7 +837,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   } else {
     request = await draftRequest({ projectId, conversationId, question, memory });
     // Only offer what can actually happen: without a repository there is nothing to file against.
-    const offer = reportOffer(outcome, input.repoFullName);
+    const offer = reportOffer(outcome, repoFullName);
     const searched = (capabilities.evidence as { graph?: { pages: number; controls: number } } | null)?.graph;
     const where = searched && searched.controls > 0
       ? `I checked the documentation, this page, and ${searched.pages} ${searched.pages === 1 ? "page" : "pages"} with ${searched.controls} controls of this product, and found nothing.`
@@ -825,16 +879,10 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
 
   const persisted = await persistAnswer({ conversationId, text, steps, probes, verdict, request, grounding });
 
-  // Even when the user never asks for it, a gap the agent found is worth the developers knowing.
-  // It joins the other reports of the same gap and rises with them.
-  const note = request
-    ? await noteRequest({
-        projectId,
-        request,
-        conversationId,
-        messageId: persisted.messageId || null,
-      })
-    : { noted: false, groupId: null };
+  // A gap the agent found joins the other reports of the same gap and rises with them, so the
+  // console can see how often it comes back. Nothing is filed by it: opening an issue in the
+  // customer's repository is what "Report to developers" is for.
+  const note = request ? await noteRequest({ projectId, request }) : { noted: false, groupId: null };
 
   // A confirmed absence asks the second question: is this one person, or a pattern? The answer
   // comes from PostHog through the opportunity pipeline, enqueued here and run off this turn.
@@ -846,7 +894,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     type: "answer",
     text,
     steps,
-    escalation: escalationOffer(request, input.repoFullName),
+    escalation: escalationOffer(request, repoFullName),
     noted: note.noted,
     ...(plan ? { plan } : {}),
     ...(sources.length ? { sources } : {}),

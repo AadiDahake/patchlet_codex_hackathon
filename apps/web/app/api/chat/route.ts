@@ -43,7 +43,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const { data: project } = await serviceClient()
     .from("project")
-    .select("id, repo_full_name, repo_default_branch, settings")
+    .select("id, repo_full_name, repo_default_branch, site_url, settings")
     .eq("embed_key", key)
     .maybeSingle();
   if (!project) {
@@ -76,6 +76,7 @@ export async function POST(request: Request): Promise<Response> {
           projectId: project.id as string,
           repoFullName: (project.repo_full_name as string) ?? null,
           defaultBranch: (project.repo_default_branch as string) ?? "main",
+          siteUrl: (project.site_url as string) ?? null,
           question,
           page,
           conversationId: body.conversationId,

@@ -9,6 +9,7 @@
 import { corsJson, preflight } from "@/lib/cors";
 import { controlKey, routeOf } from "@patchlet/shared";
 import type { PageContext } from "@patchlet/shared";
+import { belongsToSite } from "@/lib/graph/origin";
 import { recordScan, recordTransition } from "@/lib/graph/store";
 import { serviceClient } from "@/lib/supabase";
 
@@ -74,11 +75,17 @@ export async function POST(request: Request): Promise<Response> {
 
   const { data: project } = await serviceClient()
     .from("project")
-    .select("id")
+    .select("id, site_url")
     .eq("embed_key", body.key)
     .maybeSingle();
   if (!project) return corsJson({ error: "unknown key" }, { status: 403 });
   const projectId = String(project.id);
+
+  // The same rule the turn applies: only the site the project names teaches the product map, so a
+  // widget running on a preview deployment is answered and nothing it saw is written down.
+  if (!belongsToSite((project.site_url as string) ?? null, page.url)) {
+    return corsJson({ ok: true });
+  }
 
   try {
     const toRoute = await recordScan(projectId, page, "widget");

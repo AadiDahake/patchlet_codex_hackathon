@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Resets the demo: closes the worker's issues and pull requests in the target repository, deletes
-// its branches, clears escalations, request groups, conversations and trace events, and moves `main`
-// back to the `demo-baseline` tag. Run through vault-exec so the tokens are in the environment.
+// its branches, clears escalations, request groups, conversations, known routes and trace events,
+// and moves `main` back to the `demo-baseline` tag. Run through vault-exec so the tokens are in
+// the environment.
 //
 //   node scripts/reset-demo.mjs [--dry-run] [--skip-main] [--repo owner/name]
 //
@@ -104,7 +105,7 @@ async function main() {
 
   log(`${dryRun ? "would close" : "closed"} ${summary.issuesClosed} issue(s) and ${summary.pullRequestsClosed} pull request(s)`);
   log(`${dryRun ? "would delete" : "deleted"} ${summary.branchesDeleted} branch(es)`);
-  log(`${dryRun ? "would delete" : "deleted"} ${summary.traceEvents} trace event(s), ${summary.escalations} escalation(s), ${summary.requestGroups} request group(s), ${summary.conversations} conversation(s)`);
+  log(`${dryRun ? "would delete" : "deleted"} ${summary.traceEvents} trace event(s), ${summary.escalations} escalation(s), ${summary.requestGroups} request group(s), ${summary.conversations} conversation(s), ${summary.knownRoutes} known route(s)`);
   for (const problem of summary.problems) console.warn(`warning: ${problem}`);
 
   const mainState = GITHUB_TOKEN && !skipMain ? await resetMain() : "skipped";

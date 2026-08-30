@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +18,22 @@ from steps.github_token import project_token
 from steps.reporter import Reporter
 
 PAUSE_LABEL = "Merge this pull request?"
+
+# How long a run that lost the race for a group's issue waits for the winner to file it, and how
+# often it looks. Filing an issue is a handful of GitHub calls, so half a minute is generous; a
+# waiter that gives up takes the slot over rather than leaving the request unfiled.
+ISSUE_WAIT_S = 30
+ISSUE_POLL_S = 1.0
+
+# What went wrong, in the words a person reads in the console. The step name means nothing to them.
+STEP_FAILURES = {
+    "file_issue": "Patchlet could not open the issue for this request.",
+    "inspect_repository": "Patchlet could not read the repository to plan this change.",
+    "draft_implementation": "Patchlet could not get a change past the repository's own checks.",
+    "open_draft_pr": "Patchlet could not open the pull request for this change.",
+    "merge_and_deploy": "Patchlet could not finish merging and releasing this change.",
+    "update_group": "Patchlet could not add this new report to the issue.",
+}
 
 
 def _slug(text: str, limit: int = 40) -> str:
@@ -34,13 +52,122 @@ def _set_group(req: FeatureRequestInput, **fields: object) -> None:
         db.update_group(req.group_id, **fields)
 
 
+def _open_pull_request(req: FeatureRequestInput) -> str:
+    """The pull request this run already opened, from its own row or from its group.
+
+    Reads on the failure path are best effort: this often runs because the database was the thing
+    that was unreachable, and not knowing about a pull request must never stop the failure being
+    recorded.
+    """
+    try:
+        rows = (db.get_escalation(req.escalation_id), db.get_group(req.group_id) if req.group_id else None)
+    except Exception:  # noqa: BLE001 - see above
+        return ""
+    for row in rows:
+        url = str((row or {}).get("pr_url") or "")
+        if url:
+            return url
+    return ""
+
+
+def _reopen_for_retry(req: FeatureRequestInput) -> None:
+    """Leave the group where a later report can pick it up again.
+
+    A run that died mid-draft leaves the group reading `drafting`, and `actionFor` never starts a
+    second full run against a group in that state, so the request would be stuck for good. The
+    issue is never closed here: it is the record of the request, and it is what a retry attaches
+    to.
+    """
+    if not req.group_id:
+        return
+    try:
+        db.release_issue_slot(req.group_id, req.escalation_id)
+        group = db.get_group(req.group_id) or {}
+        if str(group.get("status") or "") == "drafting" and not group.get("pr_url"):
+            db.update_group(req.group_id, status="filed" if group.get("issue_number") else "observed")
+    except Exception:  # noqa: BLE001 - best effort, like the read above
+        return
+
+
 def fail(req: FeatureRequestInput, step: str, error: Exception) -> None:
+    """Record a run that could not finish, in words a reader can act on.
+
+    Two things outrank the stack trace. A run whose pull request is already open has done the work
+    somebody is waiting to approve, so a blip on the call that was recording it never turns into a
+    failed request. And whatever else happened, the issue stays open and the group goes back to a
+    state a later report can start from, so asking again is all it takes.
+    """
     message = f"{step}: {error}"
+    opened = _open_pull_request(req)
+    if opened:
+        db.update_escalation(req.escalation_id, status="awaiting_approval", pr_url=opened, error=message[:2000])
+        trace.status(
+            req.project_id,
+            req.trace_id(),
+            "The pull request is open and waiting for approval, so this run was not failed",
+            detail={"pr_url": opened, "message": message[:2000]},
+        )
+        return
+
+    plain = STEP_FAILURES.get(step, "Patchlet could not finish this request.")
     db.update_escalation(req.escalation_id, status="failed", error=message[:2000])
-    trace.error(req.project_id, req.trace_id(), f"{step} failed", message)
+    trace.error(
+        req.project_id,
+        req.trace_id(),
+        plain,
+        f"{plain} Nothing was lost and the request is still open, so it can be tried again.\n\n{message}",
+    )
+    _reopen_for_retry(req)
 
 
 # ---- 1. file_issue ----------------------------------------------------------
+
+def _group_issue_number(req: FeatureRequestInput) -> int:
+    """The issue this group already has, from the run's own input or from the group row now.
+
+    The runner read the group when it claimed the row, which can be seconds before this step gets
+    there. Reading it again is what closes the window in which two runs both believe the group has
+    no issue yet.
+    """
+    if req.issue_number:
+        return req.issue_number
+    if not req.group_id:
+        return 0
+    return int((db.get_group(req.group_id) or {}).get("issue_number") or 0)
+
+
+def _wait_for_group_issue(req: FeatureRequestInput, sleep: Callable[[float], None] = time.sleep) -> int:
+    """Claim the right to file this group's issue, or wait for whoever holds it.
+
+    Exactly one run wins the conditional update on `issue_claim`, and it files. Everyone else polls
+    the group until the winner's `issue_number` appears and comments on that issue instead, which is
+    what makes one reported gap one issue no matter which run reaches GitHub first. A claim that
+    never produces an issue is taken over rather than waited on for ever.
+    """
+    if not req.group_id:
+        return 0
+    if db.claim_issue_slot(req.group_id, req.escalation_id):
+        return 0
+
+    deadline = time.monotonic() + ISSUE_WAIT_S
+    while time.monotonic() < deadline:
+        sleep(ISSUE_POLL_S)
+        group = db.get_group(req.group_id) or {}
+        number = int(group.get("issue_number") or 0)
+        if number:
+            trace.status(
+                req.project_id,
+                req.trace_id(),
+                f"Another run filed issue #{number} for this request, so this one joins it",
+                detail={"issue_number": number, "group_id": req.group_id},
+            )
+            return number
+        if not group.get("issue_claim"):
+            break
+    # Whoever held the claim did not file. Take it over so the request is not left unrecorded.
+    db.claim_issue_slot(req.group_id, req.escalation_id)
+    return 0
+
 
 def file_issue(req: FeatureRequestInput) -> IssueRef:
     _set_status(req, "filing")
@@ -81,8 +208,12 @@ def file_issue(req: FeatureRequestInput) -> IssueRef:
             f"POST /repos/{req.repo_full_name}/labels", ", ".join(created_labels),
         )
 
+    # One gap in one group is one issue, whoever files it and however the runs overlap.
+    number = _group_issue_number(req)
+    if not number:
+        number = _wait_for_group_issue(req)
     # The group already knows its issue; a run without one falls back to matching the title.
-    existing = github.get_issue(req.issue_number) if req.issue_number else github.find_open_issue_by_title(req.title)
+    existing = github.get_issue(number) if number else github.find_open_issue_by_title(req.title)
     if existing:
         number = int(existing["number"])
         # The same request arriving again is signal, so the issue counts it and quotes the new user.
@@ -124,7 +255,13 @@ def file_issue(req: FeatureRequestInput) -> IssueRef:
         )
     trace.issue(req.project_id, req.trace_id(), ref.url, ref.number, ref.deduplicated)
     db.update_escalation(req.escalation_id, issue_url=ref.url, issue_number=ref.number)
-    group_fields: dict[str, object] = {"issue_url": ref.url, "issue_number": ref.number, "priority": priority}
+    # The number is now on the group, so the slot this run may have been holding is done with.
+    group_fields: dict[str, object] = {
+        "issue_url": ref.url,
+        "issue_number": ref.number,
+        "priority": priority,
+        "issue_claim": None,
+    }
     # A full run is already past this; only the issue-only run leaves the group at "filed".
     if req.file_only:
         group_fields["status"] = "filed"

@@ -1,4 +1,8 @@
-"""GitHub REST and GraphQL client used by the worker. One small method per API call."""
+"""GitHub REST and GraphQL client used by the worker. One small method per API call.
+
+Every call goes out through `steps.retry.send`: a dropped connection or a 502 from GitHub is not a
+verdict on the escalation, and one blip must not cost a user their request (see `retry.py`).
+"""
 
 from __future__ import annotations
 
@@ -8,9 +12,8 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import quote
 
-import requests
-
 import config
+from steps import retry
 from steps.github_token import project_token
 
 API = "https://api.github.com"
@@ -65,7 +68,7 @@ class GitHubClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         url = path if path.startswith("http") else f"{API}{path}"
-        response = requests.request(method, url, headers=self._headers(), timeout=TIMEOUT, **kwargs)
+        response = retry.send(method, url, headers=self._headers(), timeout=TIMEOUT, **kwargs)
         if response.status_code >= 400:
             raise GitHubError(f"{method} {path} -> {response.status_code}: {response.text[:500]}")
         if response.status_code == 204 or not response.content:
@@ -76,8 +79,8 @@ class GitHubClient:
         return f"/repos/{self.owner}/{self.repo}{suffix}"
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        response = requests.post(
-            GRAPHQL, headers=self._headers(), json={"query": query, "variables": variables}, timeout=TIMEOUT
+        response = retry.send(
+            "POST", GRAPHQL, headers=self._headers(), json={"query": query, "variables": variables}, timeout=TIMEOUT
         )
         if response.status_code >= 400:
             raise GitHubError(f"GraphQL -> {response.status_code}: {response.text[:500]}")

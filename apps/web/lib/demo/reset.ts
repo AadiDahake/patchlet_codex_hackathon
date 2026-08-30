@@ -15,7 +15,7 @@ export type ResetOptions = {
   githubToken: string | null;
   supabaseUrl: string | null;
   supabaseKey: string | null;
-  /** Only this project's conversations, requests, escalations and trace events are cleared. */
+  /** Only this project's conversations, requests, escalations, known routes and trace events are cleared. */
   projectId: string;
   /** Report what would happen and change nothing. */
   dryRun?: boolean;
@@ -31,6 +31,8 @@ export type ResetSummary = {
   escalations: number;
   requestGroups: number;
   conversations: number;
+  /** Questions the agent had already resolved to a control, which would otherwise pin an answer. */
+  knownRoutes: number;
   /** Anything that could not be done, in words a person can act on. */
   problems: string[];
 };
@@ -145,8 +147,9 @@ function reason(error: unknown): string {
 
 /**
  * Closes what the worker opened, deletes its branches, and clears the conversations, request
- * groups, escalations and trace events of one project. A step that fails is recorded and the rest still runs, because
- * a half-reset demo is worse than one that says which half is left.
+ * groups, escalations, known routes and trace events of one project. A step that fails is recorded
+ * and the rest still runs, because a half-reset demo is worse than one that says which half is
+ * left.
  */
 export async function resetDemo(options: ResetOptions): Promise<ResetSummary> {
   const dryRun = options.dryRun ?? false;
@@ -160,6 +163,7 @@ export async function resetDemo(options: ResetOptions): Promise<ResetSummary> {
     escalations: 0,
     requestGroups: 0,
     conversations: 0,
+    knownRoutes: 0,
     problems: [],
   };
 
@@ -186,12 +190,14 @@ export async function resetDemo(options: ResetOptions): Promise<ResetSummary> {
   if (supabaseUrl && supabaseKey) {
     // Trace events first: they point at the escalations and conversations that follow. Request
     // groups have to go too, or the next demo joins the group this one left behind and files
-    // nothing.
+    // nothing. Known routes go with them: a route the agent remembered answers the demo's first
+    // question from the last run's product map, before a single check runs.
     for (const [name, table] of [
       ["traceEvents", "trace_event"],
       ["escalations", "escalation"],
       ["requestGroups", "feature_request_group"],
       ["conversations", "conversation"],
+      ["knownRoutes", "known_route"],
     ] as const) {
       try {
         summary[name] = await clearTable(
