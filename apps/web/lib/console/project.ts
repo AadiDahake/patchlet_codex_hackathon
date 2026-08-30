@@ -52,6 +52,12 @@ export async function loadProjectByOwner(ownerId: string): Promise<ConsoleProjec
   return data ? toProject(data as Record<string, unknown>) : null;
 }
 
+/** The project with this slug, or null. Only the console token path resolves a project this way. */
+export async function loadProjectBySlug(slug: string): Promise<ConsoleProject | null> {
+  const { data } = await serviceClient().from("project").select(PROJECT_COLUMNS).eq("slug", slug).maybeSingle();
+  return data ? toProject(data as Record<string, unknown>) : null;
+}
+
 /** The name the console shows: the company from sign-up, falling back to the stored name. */
 export function projectDisplayName(project: ConsoleProject): string {
   return project.company?.trim() || project.name;
