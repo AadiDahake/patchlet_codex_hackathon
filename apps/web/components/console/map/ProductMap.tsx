@@ -11,6 +11,27 @@ type Props = {
   siteUrl: string | null;
 };
 
+/** How long the page waits between looks at the job while it is queued or running. */
+const POLL_MS = 3_000;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+type ExploreJob = {
+  id: string;
+  status: "queued" | "running" | "done" | "failed";
+  summary: ExploreSummary | null;
+  error: string | null;
+};
+
+/** What the job is doing right now, in one line the person waiting can act on. */
+function jobLine(job: ExploreJob): string {
+  if (job.status === "queued") {
+    return "Queued. A machine with a browser picks it up: the forge runner, or npm run explore -- --drain.";
+  }
+  if (job.status === "running") return "Exploring the site. Pages appear below as they are read.";
+  return "";
+}
+
 type ExploreSummary = {
   pages: number;
   controls: number;
@@ -46,6 +67,9 @@ export function ProductMap({ initialGraph, initialRoutes, siteUrl }: Props) {
     setRoutes(body.routes ?? []);
   }, []);
 
+  // The route only queues the job: a browser runs on a machine of the team's, not in the
+  // function that answers here. The page polls the job and the graph, so pages appear as they
+  // are read and the summary lands when the run ends.
   const explore = useCallback(async () => {
     setStartedAt(Date.now());
     setElapsed(0);
@@ -53,9 +77,20 @@ export function ProductMap({ initialGraph, initialRoutes, siteUrl }: Props) {
     setError("");
     try {
       const response = await fetch("/api/site/explore", { method: "POST" });
-      const body = (await response.json()) as { summary?: ExploreSummary; error?: string };
-      if (!response.ok || !body.summary) throw new Error(body.error ?? "The site could not be explored.");
-      setResult(summaryLine(body.summary));
+      const body = (await response.json()) as { job?: ExploreJob; error?: string };
+      if (!response.ok || !body.job) throw new Error(body.error ?? "The site could not be explored.");
+      let job: ExploreJob = body.job;
+      setResult(jobLine(job));
+      while (job.status === "queued" || job.status === "running") {
+        await sleep(POLL_MS);
+        const poll = await fetch("/api/site/explore");
+        const latest = (await poll.json()) as { job?: ExploreJob | null };
+        if (latest.job) job = latest.job;
+        setResult(jobLine(job));
+        if (job.status === "running") await refresh();
+      }
+      if (job.status === "failed") throw new Error(job.error ?? "The site could not be explored.");
+      if (job.summary) setResult(summaryLine(job.summary));
       await refresh();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "The site could not be explored.");
