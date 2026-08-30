@@ -23,6 +23,11 @@ create table if not exists trajectory (
   step_count int not null default 0,
   -- The ordered [{t, event, props}] list, exactly the shape the compiler consumes.
   steps jsonb not null,
+  -- The manual steps a capability call would replace, as the compiler counts them.
+  manual_actions int not null default 0,
+  -- The steps as prose, [{line, seconds}], rendered once by the compiler so the console says
+  -- what the prompts said and never has to evaluate the compiler itself.
+  rendered jsonb,
   -- OS-Genesis reverse task synthesis: the goal inferred from those steps.
   inferred_goal text,
   goal_name text,
