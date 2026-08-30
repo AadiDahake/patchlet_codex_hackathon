@@ -24,7 +24,9 @@ For one escalation it:
    `~/.cache/patchlet/<repo>` keyed by the lockfile hash), then every gate the target's
    `package.json` defines, cheapest first: `npm run typecheck`, `npm test`, `npm run build`. On
    failure the gate output goes back to the editor for the affected file (up to 3 repairs), then a
-   fresh candidate is drafted (up to 2 candidates).
+   fresh candidate is drafted (up to 2 candidates). A repair also gets the files the gate named that
+   the plan does not touch, read from the clone: a failing test says what the code has to satisfy,
+   and a stack trace alone does not carry the signature it is being called with.
 4. **Opens a draft pull request** on `patchlet/<issue>-<slug>` with one commit
    (`feat: <title>`, `Closes #<n>`; a deleted path goes into the tree with a null blob sha), through
    MCP `create_pull_request` with a REST fallback. The body names the request, the user's quote, the
