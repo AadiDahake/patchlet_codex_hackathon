@@ -10,6 +10,7 @@ import {
   MODELS,
   concepts,
   coverageNeeded,
+  coversCapability,
   graphSize,
   searchControls,
 } from "@patchlet/shared";
@@ -213,8 +214,9 @@ const DOCUMENTATION_LINK = /^(https?:\/\/[^/]+)?\/(help|support|faq|docs|documen
  */
 export function probeInterface(question: string, page: PageContext, feature = ""): ProbeResult {
   const started = Date.now();
-  const capability = concepts(expand(feature || question));
-  const featureTokens = concepts(feature || question);
+  const asked = feature || question;
+  const capability = concepts(expand(asked));
+  const featureTokens = concepts(asked);
   const scored = page.affordances
     .map((affordance: Affordance) => {
       const label = `${affordance.name} ${affordance.text ?? ""}`;
@@ -228,7 +230,12 @@ export function probeInterface(question: string, page: PageContext, feature = ""
       let shared = 0;
       for (const token of have) if (capability.has(token)) shared += 1;
       const labelFocus = have.size === 0 ? 0 : shared / have.size;
-      let score = Math.min(featureCoverage, Math.max(labelFocus, 0.5));
+      // The damping is for a label that shares a word with the capability, not for one that
+      // accounts for it: "Find three seats together" says the same thing as "Find seats together"
+      // with one word more, and used to score below the line for exactly that.
+      let score = coversCapability(asked, affordance.name)
+        ? featureCoverage
+        : Math.min(featureCoverage, Math.max(labelFocus, 0.5));
       // A link into the help pages is about the capability; it is not the capability.
       if (affordance.role === "link" && affordance.href && DOCUMENTATION_LINK.test(affordance.href)) score *= 0.6;
       return { affordance, score };

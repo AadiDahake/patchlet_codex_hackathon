@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { controlKey } from "@patchlet/shared";
 import type { PageContext } from "@patchlet/shared";
 import { intentKey } from "@/lib/graph/intent";
+import { mapWithCurrentPage } from "@/lib/graph/live";
 import { belongsToSite } from "@/lib/graph/origin";
 import { controlRows } from "@/lib/graph/store";
 
@@ -78,5 +79,69 @@ describe("belongsToSite", () => {
 
   it("refuses a page whose own address cannot be read", () => {
     expect(belongsToSite(SITE, "about:blank")).toBe(false);
+  });
+});
+
+/**
+ * The page the visitor is standing on is part of the map for the length of one turn, whether or
+ * not it was ever written down. A control that is on screen is a control the agent may point at.
+ */
+describe("mapWithCurrentPage", () => {
+  const seatMap: PageContext = {
+    url: "https://novaair-4vs9gj5jt-dahakeaadi-2078s-projects.vercel.app/trips/NVA7K2/seats",
+    title: "Choose Seats | NovaAir",
+    affordances: [
+      { id: "s1", role: "button", name: "Seat 1C, available, 45 dollars", landmark: "main", visible: true },
+      { id: "s2", role: "button", name: "Find three seats together", landmark: "sidebar", visible: true },
+    ],
+  };
+
+  it("adds the controls of the page the visitor is on, keyed the way the map keys them", () => {
+    const merged = mapWithCurrentPage({ pages: [], controls: [], transitions: [] }, seatMap);
+    expect(merged.controls.map((control) => control.key)).toEqual([
+      "button|seat 1c, available, 45 dollars|main|",
+      "button|find three seats together|sidebar|",
+    ]);
+    expect(merged.controls.every((control) => control.route === "/trips/:id/seats")).toBe(true);
+    expect(merged.pages.map((page) => page.route)).toEqual(["/trips/:id/seats"]);
+  });
+
+  it("leaves a control the map already holds exactly as it was stored", () => {
+    const stored = {
+      pages: [
+        {
+          route: "/trips/:id/seats",
+          url: "http://localhost:4150/trips/NVA7K2/seats",
+          title: "Choose Seats | NovaAir",
+          source: "explorer",
+          firstSeen: "2026-08-01T00:00:00.000Z",
+          lastSeen: "2026-08-01T00:00:00.000Z",
+        },
+      ],
+      controls: [
+        {
+          id: "control-1",
+          route: "/trips/:id/seats",
+          key: "button|seat 1c, available, 45 dollars|main|",
+          role: "button",
+          name: "Seat 1C, available, 45 dollars",
+          landmark: "main",
+          visible: true,
+          seenCount: 4,
+          lastSeen: "2026-08-01T00:00:00.000Z",
+        },
+      ],
+      transitions: [],
+    };
+
+    const merged = mapWithCurrentPage(stored, seatMap);
+    expect(merged.controls).toHaveLength(2);
+    expect(merged.controls[0]).toBe(stored.controls[0]);
+    expect(merged.pages).toBe(stored.pages);
+  });
+
+  it("changes nothing when the page adds nothing the map has not got", () => {
+    const graph = mapWithCurrentPage({ pages: [], controls: [], transitions: [] }, seatMap);
+    expect(mapWithCurrentPage(graph, seatMap)).toBe(graph);
   });
 });

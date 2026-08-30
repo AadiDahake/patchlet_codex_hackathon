@@ -623,3 +623,133 @@ describe("the walk that has to keep its count", () => {
     expect(answer?.steps?.map((step) => step.target)).toEqual(["a4"]);
   });
 });
+
+/** The seat map of a build that has the capability, served before anything about it was recorded. */
+const SEAT_MAP_NEW_BUTTON: PageContext = {
+  ...SEAT_MAP,
+  affordances: [
+    ...SEAT_MAP.affordances,
+    { id: "s7", role: "button", name: "Find three seats together", landmark: "sidebar", visible: true },
+  ],
+};
+
+/** The same page, served by a preview deployment of the branch that adds the button. */
+const PREVIEW_NEW_BUTTON: PageContext = {
+  ...SEAT_MAP_NEW_BUTTON,
+  url: "https://novaair-4vs9gj5jt-dahakeaadi-2078s-projects.vercel.app/trips/NVA7K2/seats",
+};
+
+/**
+ * The closing beat. The control is on the page in front of the visitor and nowhere in the product
+ * map: it shipped minutes ago, or it is a preview deployment the map is not allowed to learn from.
+ * Either way the visitor can press it, so it is what the answer points at, in one step.
+ */
+describe("a control the page has and the product map has not", () => {
+  beforeEach(() => {
+    graph = NOVAAIR_GRAPH;
+    chunks = [];
+    answers = {
+      understanding: { intent: "product", feature: "finding seats together" },
+      // The stand-in for the resolution model: pick the candidate by its name, never by position.
+      resolve_target: (user: string) => ({
+        target:
+          user.split("\n").find((row) => /^c\d+: .*"Find three seats together"/.test(row))?.split(":")[0] ?? "none",
+        answer: 'You can do this with "Find three seats together" on this page. I will show you.',
+        captions: ["Select Find three seats together"],
+      }),
+    };
+  });
+
+  const pages = [
+    { where: "the project's own site", page: SEAT_MAP_NEW_BUTTON, recorded: true },
+    { where: "a preview deployment", page: PREVIEW_NEW_BUTTON, recorded: false },
+  ];
+
+  for (const { where, page, recorded } of pages) {
+    it(`points at the control in one step, on ${where}`, async () => {
+      const events = await stream("How do I get seats together now?", page);
+      const answer = answerOf(events);
+
+      expect(events.find((event) => event.type === "verdict")?.verdict.outcome).toBe("answer");
+      expect(answer?.plan).toEqual({
+        source: "graph",
+        total: 1,
+        destination: { route: "/trips/:id/seats", title: "Choose Seats | NovaAir" },
+      });
+      expect(answer?.steps?.map((step) => step.target)).toEqual(["s7"]);
+      expect(answer?.steps?.[0]?.control?.name).toBe("Find three seats together");
+      expect(answer?.escalation).toEqual({ offered: false });
+      // The page planner is never reached, so no seat button is ever a step.
+      expect(calls.map((call) => call.name)).toEqual(["understanding", "resolve_target"]);
+    });
+
+    it(`points at it even when the model declines every candidate, on ${where}`, async () => {
+      answers.resolve_target = { target: "none", answer: "", captions: [] };
+      const answer = answerOf(await stream("How do I get seats together now?", page));
+
+      expect(answer?.steps?.map((step) => step.target)).toEqual(["s7"]);
+      expect(answer?.steps?.[0]?.caption).toBe("Select Find three seats together");
+      expect(answer?.text).toContain('"Find three seats together" on this page');
+      expect(calls.map((call) => call.name)).not.toContain("plan");
+    });
+
+    it(`writes ${recorded ? "the page" : "nothing"} down, from ${where}`, async () => {
+      await stream("How do I get seats together now?", page);
+      expect(scans).toEqual(recorded ? [page.url] : []);
+      expect(saved).toHaveLength(recorded ? 1 : 0);
+    });
+  }
+});
+
+/**
+ * The page planner is the last resort, and it plans over a wall of controls that each share one
+ * word with the question. It may only point at a control that does the thing; a walk that ends on
+ * a seat cell is not an answer to "seats together", it is three clicks of the thing the visitor
+ * was already doing by hand.
+ */
+describe("the page planner on a seat map", () => {
+  beforeEach(() => {
+    graph = NOVAAIR_GRAPH;
+    chunks = [
+      {
+        document_title: "Seating a family",
+        source_ref: "http://localhost:4150/help/seating-a-family",
+        heading: "Seating a family",
+        content: "Finding a seat together: choose each seat now, one passenger at a time, on the map.",
+        similarity: 0.85,
+        confidence: null,
+      },
+    ];
+    answers = {
+      understanding: { intent: "product", feature: "finding seats together" },
+      plan: {
+        answer: "You can pick the seats one at a time on this map.",
+        steps: [
+          { target: "s2", caption: "Select available seat 1C for the first passenger", advanceOn: "click" },
+          { target: "s3", caption: "Select available seat 1D for the second passenger", advanceOn: "click" },
+          { target: "s4", caption: "Select available seat 1E for the third passenger", advanceOn: "click" },
+        ],
+      },
+    };
+  });
+
+  it("keeps the words and drops a walk that ends on a seat cell", async () => {
+    const answer = answerOf(await stream("How do I get seats together now?", SEAT_MAP));
+
+    expect(answer?.text).toBe("You can pick the seats one at a time on this map.");
+    expect(answer?.steps).toBeNull();
+    expect(answer?.plan).toBeUndefined();
+  });
+
+  it("is never reached at all once a control on the page does the thing", async () => {
+    answers.resolve_target = {
+      target: "c1",
+      answer: 'You can do this with "Find three seats together" on this page. I will show you.',
+      captions: ["Select Find three seats together"],
+    };
+    const answer = answerOf(await stream("How do I get seats together now?", SEAT_MAP_NEW_BUTTON));
+
+    expect(answer?.steps?.map((step) => step.target)).toEqual(["s7"]);
+    expect(calls.map((call) => call.name)).not.toContain("plan");
+  });
+});

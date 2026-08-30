@@ -38,6 +38,7 @@ import {
   type KnownRoute,
   type StoredGraph,
 } from "../graph/store";
+import { mapWithCurrentPage } from "../graph/live";
 import { belongsToSite } from "../graph/origin";
 import { currentPageOf } from "./bind";
 import { answerChat, answerFromPage, answerFromPassage } from "./direct";
@@ -46,7 +47,13 @@ import { affordanceList, dropRepeats } from "./page";
 import { triggerDiscovery } from "../opportunity/queue";
 import { DOCS_SURE_MISS, probeCapabilities, probeDocs, probeInterface, type DocsEvidence } from "./probes";
 import { noteRequest } from "./requests";
-import { bindFirstStep, candidatesFor, resolveTarget } from "./resolve";
+import {
+  bindFirstStep,
+  candidatesFor,
+  controlsOnThisPage,
+  planEndsOnCapability,
+  resolveTarget,
+} from "./resolve";
 import { closeConversation } from "./summary";
 import { understand } from "./understand";
 
@@ -457,7 +464,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   // 3. An exact intent-key hit is this question asked again: the same concepts, in a question
   // that already resolved to a control on this site. It is served from the product map before
   // the message is even read, which is what keeps a repeat under a second and free of a model.
-  const graphForKnown = known ? await graphPromise : null;
+  const graphForKnown = known ? mapWithCurrentPage(await graphPromise, page) : null;
   if (known && graphForKnown) {
     const served = yield* knownRouteTurn({
       projectId,
@@ -548,6 +555,10 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   // 6. A wording of this question resolved before: the answer is the route, planned again from
   // this page. A nearer wording only counts once the message is known to be about the product.
   const graph = await graphPromise;
+  // The page the visitor is standing on is part of the map for the length of this turn, whether
+  // or not it was ever written down (`lib/graph/live.ts`). The capabilities check keeps the
+  // stored map: what it searched is a claim about the product, not about this page.
+  const siteMap = mapWithCurrentPage(graph, page);
   const nearest = await questionEmbedding.then((vector) => nearestKnownRoute(projectId, vector)).catch(() => null);
   if (nearest) {
     const served = yield* knownRouteTurn({
@@ -555,7 +566,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
       conversationId,
       messageId,
       page,
-      graph,
+      graph: siteMap,
       cached: nearest,
       memory,
       announce: false,
@@ -664,7 +675,10 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     grounding = docs.evidence;
     const docsEvidence = (Array.isArray(docs.evidence) ? docs.evidence : []) as DocsEvidence[];
     const candidates =
-      graph.controls.length > 0 ? candidatesFor(graph, understanding.feature, page, docsEvidence, docs.hit) : [];
+      siteMap.controls.length > 0 ? candidatesFor(siteMap, understanding.feature, page, docsEvidence, docs.hit) : [];
+    // The controls the visitor can press right now that do what was asked. One of them is the
+    // answer, so the page planner is never reached while there is one.
+    const here = controlsOnThisPage(candidates, page, understanding.feature);
 
     let answered = false;
     let resolved = "";
@@ -701,9 +715,27 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
         source: "agent",
       });
       sources = resolution.sources;
-      if (resolution.target) {
-        const target = { route: resolution.target.control.route, key: resolution.target.control.key };
-        const route = routeFromHere(graph, page, target, resolution.captions);
+      // A control the visitor is looking at that does what was asked is the answer, whatever the
+      // model decided: it is on the screen and pressing it is the whole route. Without this the
+      // turn fell through to the page planner, which had a seat map to choose from.
+      const chosen = resolution.target ?? here[0] ?? null;
+      if (chosen && !resolution.target) {
+        void emitTrace({
+          projectId,
+          conversationId,
+          kind: "decision",
+          title: `The page has the control for this: "${chosen.control.name}"`,
+          detail: {
+            reason: "the model chose none, and this control on this page covers the capability",
+            feature: understanding.feature,
+            control: { name: chosen.control.name, role: chosen.control.role, route: chosen.control.route },
+          },
+          source: "agent",
+        });
+      }
+      if (chosen) {
+        const target = { route: chosen.control.route, key: chosen.control.key };
+        const route = routeFromHere(siteMap, page, target, resolution.target ? resolution.captions : []);
         if ("failed" in route) {
           void emitTrace({
             projectId,
@@ -721,7 +753,16 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
             source: "agent",
           });
         } else {
-          text = resolution.answer || `You can do this with "${resolution.target.control.name}" on ${route.destination.title}. I will show you.`;
+          // The words the model wrote, unless it wrote none or it is not the one that chose: a
+          // sentence from the control itself is always true, and a control on this page is on
+          // this page, not on a page title with the site's name after it.
+          const where =
+            chosen.control.route === currentPageOf(page).route
+              ? "on this page"
+              : `on ${route.destination.title}`;
+          text =
+            (resolution.target ? resolution.answer : "") ||
+            `You can do this with "${chosen.control.name}" ${where}. I will show you.`;
           steps = route.steps;
           plan = { source: "graph", total: route.steps.length, destination: route.destination };
           answered = true;
@@ -764,13 +805,12 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
       }
     }
 
-    // No control in the product map to route to, so plan over the page in front of the user, as
-    // far as it goes; the graph fills in from this scan, so the next question can do better. Only
-    // the documentation or a control on this page may put the turn here. When the product map
-    // alone did, and no candidate does what was asked, there is nothing on this page to point at,
-    // and a model handed the 169 controls of a seat map will plan a seat-by-seat click-through of
-    // a capability the product has not got.
-    if (!answered && (docs.hit || ui.hit)) {
+    // No control anywhere does this, so plan over the page in front of the user, as far as it
+    // goes. Only the documentation or a control on this page may put the turn here, and never
+    // while a control the visitor can see does what was asked: that one is the answer, and a
+    // model handed the 169 controls of a seat map instead will plan a seat-by-seat click-through
+    // of a capability the product has not got.
+    if (!answered && (docs.hit || ui.hit) && here.length === 0) {
       const planStarted = Date.now();
       const pagePlan = await chatJson<{ answer: string; steps: Step[] }>(
         MODELS.plan,
@@ -808,8 +848,30 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
         if (typeof step.target !== "string" || !known.has(step.target)) break;
         reachable.push(step);
       }
-      steps = validatePlan(reachable, page.affordances);
+      const validated = validatePlan(reachable, page.affordances);
+      // A walk is only guidance when it ends on the control that does the thing. The steps before
+      // it open a tab or a dialog; the last one is the answer, and on a page where every control
+      // shares a word with the question, a walk that ends anywhere else is not one.
+      steps =
+        validated && planEndsOnCapability(validated, page, understanding.feature, docsEvidence)
+          ? validated
+          : null;
       if (steps) plan = { source: "page", total: steps.length };
+      if (validated && !steps) {
+        void emitTrace({
+          projectId,
+          conversationId,
+          kind: "decision",
+          status: "failed",
+          title: "The steps from this page did not end on a control that does this",
+          detail: {
+            feature: understanding.feature,
+            reason: "the last step is not the control the question asked for, so the answer is words alone",
+            steps: validated.map((step) => step.caption),
+          },
+          source: "agent",
+        });
+      }
       if (docs.hit) sources = sourcesFrom(docsEvidence);
       answered = true;
     }

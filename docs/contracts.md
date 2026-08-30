@@ -693,7 +693,10 @@ group id. Two rows land on the conversation that triggered the run with `source:
    deployment of an unmerged branch above all, still answers the question from its live controls
    and writes nothing: no page, no affordance, no transition and no `known_route`. A project with
    no `site_url` has not said where it lives, so every scan is taken. `POST /api/site/observe`
-   applies the same rule. The question's intent key (its concepts, sorted) is looked up in
+   applies the same rule. What the visitor is told is decided separately: `mapWithCurrentPage`
+   (`apps/web/lib/graph/live.ts`) merges this page's controls into the map the turn plans over, in
+   memory and for this turn only, so a control on the screen is always a control the answer may
+   point at whatever the origin, the cache or the scan did. The question's intent key (its concepts, sorted) is looked up in
    `known_route`; a miss is retried by the question's embedding at cosine 0.92 or above once it is
    in flight. The question's embedding, the site graph and the read below all start here, together.
 3. **Read the message** with `MODELS.understand` and a JSON schema (`agent/understand.ts`):
@@ -733,7 +736,10 @@ group id. Two rows land on the conversation that triggered the run with `source:
      feature and each affordance's name, text, landmark and href, with simple stemming and a small
      synonym list (theme/dark/light/appearance, username/display name/name/profile/account). Score
      0..1 is the best match; a hit needs `coversCapability` (below), never the raw threshold alone.
-     Evidence is the top 5 affordance ids with their names and scores.
+     A long label is damped so it cannot win on one shared word, but a name that covers the
+     capability keeps its full coverage as its score however many other words it carries, so "Find
+     three seats together" scores what "Find seats together" scores. Evidence is the top 5
+     affordance ids with their names and scores.
    - **repository**, labelled "Known product capabilities": the site graph first, then the
      repository. `searchControls` over every control the graph knows; a hit when a control's own
      accessible name covers the capability, and then `score` is that control's coverage, so
@@ -769,14 +775,20 @@ group id. Two rows land on the conversation that triggered the run with `source:
      off screen) and checked with `validatePlan(steps, affordances, 8)`; captions that fail are
      replaced by ones written from the control's role and name. The answer carries
      `plan: {source: "graph", total}` and `sources`, and the target is saved as a known route. When
-     the model names no target but the documentation hit, the answer is the prose with no steps.
+     the model names no target and a control the visitor can see covers the capability, that
+     control is the target anyway: it is on the screen and pressing it is the whole route. When it
+     names no target and the documentation hit, the answer is the prose with no steps.
    - `answer` without a graph route, and only when the documentation check or the interface check
-     is what found the capability: `MODELS.plan` with `{answer, steps: [{target, caption,
-     advanceOn}]}` over the documentation evidence and the current page's affordance list, at most
-     5 steps, captions at most 12 words, `validatePlan`; `plan.source: "page"`. When neither of
-     those found it and no candidate control does what was asked, nothing is planned over the page
-     and nothing is claimed from it: the turn says so and drafts the request, so the answer carries
-     the report offer rather than a walk through controls that do something else.
+     is what found the capability and no control the visitor can see does what was asked:
+     `MODELS.plan` with `{answer, steps: [{target, caption, advanceOn}]}` over the documentation
+     evidence and the current page's affordance list, at most 5 steps, captions at most 12 words,
+     `validatePlan`; `plan.source: "page"`. The walk is kept only when its last step lands on a
+     control that passes one of the two doors above (`planEndsOnCapability`); otherwise the prose
+     is kept and the steps are dropped, because a walk that ends on a control that does something
+     else is not guidance. When neither check found it and no candidate control does what was
+     asked, nothing is planned over the page and nothing is claimed from it: the turn says so and
+     drafts the request, so the answer carries the report offer rather than a walk through controls
+     that do something else.
    - `hedge`: the same model, an honest answer that the feature could not be confirmed, no steps,
      escalation offered with a drafted request.
    - `absent`: an apology, a plain statement, and an offer, for example "Dark mode is not available

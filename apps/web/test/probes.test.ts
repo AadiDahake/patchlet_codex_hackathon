@@ -99,6 +99,25 @@ describe("the interface check on a seat map", () => {
     expect(result.score).toBeLessThan(2 / 3);
   });
 
+  /**
+   * The one rule is the control's own name against the capability, and nothing else. A longer
+   * name says the same thing with more words, and used to score below the line for it.
+   */
+  it("hits on a longer name that still says what the capability is", () => {
+    const built = {
+      ...seatMap,
+      affordances: [
+        ...seatMap.affordances,
+        { id: "a8", role: "button", name: "Find three seats together", landmark: "sidebar", visible: true },
+      ],
+    };
+    for (const capability of ["finding seats together", "getting seats together"]) {
+      const result = probeInterface("How do I get seats together now?", built, capability);
+      expect(result.hit).toBe(true);
+      expect((result.evidence as { id: string }[])[0]?.id).toBe("a8");
+    }
+  });
+
   it("hits on the accessible name of the control once the seat map has one", () => {
     const built = {
       ...seatMap,
