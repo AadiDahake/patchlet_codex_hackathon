@@ -6,6 +6,7 @@
  * run with its candidates, and the newest outcome.
  */
 import type { CapabilityIR, EvidenceTrajectory } from "@patchlet/capability";
+import type { RenderedStep } from "./describe";
 import type { DeploymentOutcome, Discovery, OpportunitySummary, RequestGroup } from "@patchlet/shared";
 import { toRequestGroup } from "../console/groups";
 import { CANDIDATE_SELECT, toCandidateRow, type CandidateRow } from "../forge/store";
@@ -61,7 +62,7 @@ export type RepresentativeTrajectory = {
   sessionId: string;
   label: string;
   replayUrl: string | null;
-  steps: { line: string; seconds: number }[];
+  steps: RenderedStep[];
   manualActions: number;
   refusals: number;
   reward: { completion: number | null; coherence: number | null } | null;
@@ -251,43 +252,39 @@ function refusalsOf(steps: EvidenceTrajectory["steps"]): number {
   return steps.filter((step) => step.event === "seat_selection_rejected").length;
 }
 
-/** The compiler's pure renderers: the page says each step in the words the prompts use. */
-type Renderers = Pick<typeof import("@patchlet/capability"), "countManualActions" | "renderStep" | "secondsBetween">;
+/** What the pipeline stored per session: the compiler's own count and its own prose. */
+export type DescribedRow = { manualActions: number; rendered: RenderedStep[] };
 
-let renderers: Promise<Renderers> | null = null;
-
-/**
- * Loaded on first use rather than at import. The compiler reads its prompt files through
- * `import.meta.url` when its modules evaluate, which a server page's build-time evaluation does
- * not provide; a request does.
- */
-function compiler(): Promise<Renderers> {
-  renderers ??= import("@patchlet/capability");
-  return renderers;
+function isRenderedStep(value: unknown): value is RenderedStep {
+  const row = value as { line?: unknown; seconds?: unknown };
+  return typeof row?.line === "string" && typeof row?.seconds === "number";
 }
 
-function render(trajectory: EvidenceTrajectory, r: Renderers): RepresentativeTrajectory["steps"] {
+/** A row's rendering, or the bare event names when the row predates the rendering. */
+function renderedOf(row: DescribedRow | undefined, trajectory: EvidenceTrajectory): RenderedStep[] {
+  if (row && row.rendered.length === trajectory.steps.length) return row.rendered;
   return trajectory.steps.map((step, index) => {
     const previous = trajectory.steps[index - 1];
-    return {
-      line: r.renderStep({ t: step.t, event: step.event, props: step.props ?? {} }),
-      seconds: previous ? r.secondsBetween(previous.t, step.t) : 0,
-    };
+    const seconds = previous ? Math.max(0, Math.round((Date.parse(step.t) - Date.parse(previous.t)) / 1000)) : 0;
+    return { line: step.event.replace(/_/g, " "), seconds };
   });
 }
 
 /**
  * Three sessions that show the three shapes the plan describes: one that went straight to the
- * seats, one that backtracked through refusals, and one that moved each passenger in turn.
+ * seats, one that backtracked through refusals, and one that moved each passenger in turn. The
+ * supporting sessions come from the specification's evidence; the counts and the prose from the
+ * rows the pipeline described.
  */
-export async function representativeTrajectories(trajectories: EvidenceTrajectory[]): Promise<RepresentativeTrajectory[]> {
+export function representativeTrajectories(
+  trajectories: EvidenceTrajectory[],
+  rows: Map<string, DescribedRow>,
+): RepresentativeTrajectory[] {
   if (trajectories.length === 0) return [];
-  const r = await compiler();
-  const { countManualActions } = r;
-  const steps = (t: EvidenceTrajectory) => t.steps.map((s) => ({ t: s.t, event: s.event, props: s.props ?? {} }));
   const scored = trajectories.map((t) => ({
     t,
-    manual: countManualActions(steps(t)),
+    row: rows.get(t.session_id),
+    manual: rows.get(t.session_id)?.manualActions ?? t.steps.length,
     refusals: refusalsOf(t.steps),
     selections: t.steps.filter((s) => s.event === "seat_selected").length,
     coherence: t.reward?.coherence ?? 0,
@@ -306,11 +303,21 @@ export async function representativeTrajectories(trajectories: EvidenceTrajector
     sessionId: pick.t.session_id,
     label: pick.label,
     replayUrl: pick.t.replay_url ?? null,
-    steps: render(pick.t, r),
+    steps: renderedOf(pick.row, pick.t),
     manualActions: pick.manual,
     refusals: pick.refusals,
     reward: pick.t.reward ? { completion: pick.t.reward.completion ?? null, coherence: pick.t.reward.coherence ?? null } : null,
   }));
+}
+
+/** The described rows by session id, from the trajectory table's columns. */
+export function describedRows(rows: Record<string, unknown>[]): Map<string, DescribedRow> {
+  const out = new Map<string, DescribedRow>();
+  for (const row of rows) {
+    const rendered = Array.isArray(row.rendered) ? row.rendered.filter(isRenderedStep) : [];
+    out.set(String(row.session_id), { manualActions: Number(row.manual_actions ?? 0), rendered });
+  }
+  return out;
 }
 
 function countBy(values: (number | null)[]): Record<string, number> {
@@ -341,7 +348,7 @@ export async function loadOpportunity(projectId: string, groupId: string): Promi
     db.from("deployment_outcome").select(OUTCOME_COLUMNS).eq("group_id", groupId).order("measured_at", { ascending: false }).limit(1).maybeSingle(),
     db
       .from("trajectory")
-      .select("session_id, replay_url, inferred_goal, goal_name, reward_completion, reward_coherence")
+      .select("session_id, replay_url, inferred_goal, goal_name, reward_completion, reward_coherence, manual_actions, rendered")
       .eq("group_id", groupId),
   ]);
 
@@ -387,7 +394,7 @@ export async function loadOpportunity(projectId: string, groupId: string): Promi
       medianInteractions: spec?.medianInteractions ?? discovery?.medianInteractions ?? null,
       replayCount: rows.filter((row) => row.replay_url).length,
       poolCount: rows.length,
-      representative: spec ? await representativeTrajectories(spec.ir.evidence.trajectories) : [],
+      representative: spec ? representativeTrajectories(spec.ir.evidence.trajectories, describedRows(rows)) : [],
     },
     intent: {
       sentence: typeof sentence === "string" ? sentence : null,

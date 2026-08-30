@@ -3,10 +3,11 @@
  * row, and the trace. The pipeline talks to this interface only. The Supabase store is the real
  * one; the memory store serves the tests and prints nothing.
  */
-import type { CapabilityIR, Trajectory } from "@patchlet/capability";
+import type { CapabilityIR } from "@patchlet/capability";
 import type { Discovery, DiscoveryStage, DiscoveryStatus, TraceEvent } from "@patchlet/shared";
 import { serviceClient } from "../supabase";
 import { emitTrace, type TraceInput } from "../trace";
+import type { DescribedTrajectory } from "./describe";
 
 /** A trace row without the ids the store already knows. */
 export type OpportunityTrace = Omit<TraceInput, "projectId" | "groupId" | "conversationId" | "source"> & {
@@ -46,7 +47,7 @@ export type DiscoveryPatch = {
 export interface OpportunityStore {
   trace(input: OpportunityTrace): Promise<void>;
   /** Idempotent on (group, session): a re-run refreshes the rows it already wrote. */
-  upsertTrajectories(rows: Trajectory[]): Promise<void>;
+  upsertTrajectories(rows: DescribedTrajectory[]): Promise<void>;
   scoreTrajectories(scores: TrajectoryScore[]): Promise<void>;
   /** Stores the IR as the next version for the group and returns its id and version. */
   insertSpec(input: SpecInsert): Promise<{ id: string; version: number }>;
@@ -58,7 +59,7 @@ export type StoredTrace = OpportunityTrace & { source: TraceInput["source"]; at:
 /** Everything a run wrote, kept in memory. */
 export class MemoryOpportunityStore implements OpportunityStore {
   readonly events: StoredTrace[] = [];
-  readonly trajectories = new Map<string, Trajectory>();
+  readonly trajectories = new Map<string, DescribedTrajectory>();
   readonly scores = new Map<string, TrajectoryScore>();
   readonly specs: (SpecInsert & { id: string; version: number })[] = [];
   discovery: DiscoveryPatch = {};
@@ -71,8 +72,8 @@ export class MemoryOpportunityStore implements OpportunityStore {
     this.onTrace?.(event);
   }
 
-  async upsertTrajectories(rows: Trajectory[]): Promise<void> {
-    for (const row of rows) this.trajectories.set(row.session_id, row);
+  async upsertTrajectories(rows: DescribedTrajectory[]): Promise<void> {
+    for (const row of rows) this.trajectories.set(row.trajectory.session_id, row);
   }
 
   async scoreTrajectories(scores: TrajectoryScore[]): Promise<void> {
@@ -167,21 +168,23 @@ export class SupabaseOpportunityStore implements OpportunityStore {
     });
   }
 
-  async upsertTrajectories(rows: Trajectory[]): Promise<void> {
+  async upsertTrajectories(rows: DescribedTrajectory[]): Promise<void> {
     if (rows.length === 0) return;
     const { error } = await serviceClient()
       .from("trajectory")
       .upsert(
-        rows.map((row) => ({
+        rows.map(({ trajectory, manualActions, rendered }) => ({
           project_id: this.ids.projectId,
           group_id: this.ids.groupId,
-          session_id: row.session_id,
-          distinct_id: row.distinct_id ?? null,
-          started_at: row.opened_at,
-          ended_at: row.confirmed_at,
-          step_count: row.step_count,
-          steps: row.steps,
-          replay_url: row.replay_url ?? null,
+          session_id: trajectory.session_id,
+          distinct_id: trajectory.distinct_id ?? null,
+          started_at: trajectory.opened_at,
+          ended_at: trajectory.confirmed_at,
+          step_count: trajectory.step_count,
+          steps: trajectory.steps,
+          manual_actions: manualActions,
+          rendered,
+          replay_url: trajectory.replay_url ?? null,
           updated_at: new Date().toISOString(),
         })),
         { onConflict: "group_id,session_id" },

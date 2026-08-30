@@ -12,6 +12,7 @@ import { posthogWindowDays } from "../env";
 import { posthogClient, type PosthogClient } from "../posthog/client";
 import { compileOpportunity } from "./compile";
 import { compileContextFor } from "./context";
+import { describeTrajectory } from "./describe";
 import { attachReplays, mineTrajectories, type MineOptions } from "./mine";
 import { openaiModelClient } from "./model";
 import { claimDiscovery, loadDiscovery } from "./queue";
@@ -102,7 +103,7 @@ export async function runDiscovery(job: DiscoveryJob, deps: DiscoveryDeps): Prom
 
     // Step 3: replays. The link is built locally; PostHog only confirms the recording exists.
     const replays = await attachReplays(mined.trajectories, deps.posthog, { concurrency: deps.replayConcurrency });
-    await store.upsertTrajectories(mined.trajectories);
+    await store.upsertTrajectories(mined.trajectories.map(describeTrajectory));
     await store.trace({
       kind: "artifact",
       status: "ok",

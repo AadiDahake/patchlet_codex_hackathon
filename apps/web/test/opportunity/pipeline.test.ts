@@ -82,9 +82,14 @@ describe("runDiscovery", () => {
     expect(spec.medianInteractions).not.toBeNull();
     expect(spec.model).toBe("fake");
 
-    // The rows are cached with their replay links, then scored with the two reward axes apart.
+    // The rows are cached with their replay links, described once for the console, then scored
+    // with the two reward axes apart.
     expect(store.trajectories.size).toBe(SESSIONS.filter((s) => s.confirmed_at).length);
-    expect([...store.trajectories.values()].every((t) => t.replay_url)).toBe(true);
+    const described = [...store.trajectories.values()];
+    expect(described.every((t) => t.trajectory.replay_url)).toBe(true);
+    expect(described.every((t) => t.rendered.length === t.trajectory.steps.length && t.manualActions > 0)).toBe(true);
+    expect(described[0]?.rendered[0]?.line).toMatch(/^opened the seat map/);
+    expect(described[0]?.rendered[1]?.seconds).toBeGreaterThanOrEqual(0);
     const scored = [...store.scores.values()];
     expect(scored.length).toBeGreaterThan(0);
     expect(scored.some((s) => s.rewardCompletion !== null && s.rewardCoherence !== null)).toBe(true);
