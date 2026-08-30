@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from models import FeatureRequestInput, Plan, PlannedFile
-from steps import llm, repo
+from steps import applier, llm, repo
 
 MAX_FILES = 7
 # How much of the repository the architect reads. Enough of the real files to plan against them,
@@ -220,6 +220,19 @@ def build_architect_prompt(
     return "\n\n".join(parts)
 
 
+LEADING_DOT_SLASH_RE = re.compile(r"^(?:\./)+")
+
+
+def _relative(path: str) -> str:
+    """Strip a leading `./` and nothing else.
+
+    `lstrip("./")` strips those two characters in any order, which turns `../../etc/passwd` into
+    `etc/passwd` and `.git/config` into `git/config`: it rewrites a traversal into a plausible path
+    instead of leaving it recognisable for the guard below to reject.
+    """
+    return LEADING_DOT_SLASH_RE.sub("", path.strip())
+
+
 def _planned_files(raw: dict[str, object], root: Path, tree: list[str]) -> list[PlannedFile]:
     """Read the model's file list into planned files, dropping what it cannot mean."""
     existing = set(tree)
@@ -227,8 +240,14 @@ def _planned_files(raw: dict[str, object], root: Path, tree: list[str]) -> list[
     for item in raw.get("files", []) or []:
         if not isinstance(item, dict):
             continue
-        path = str(item.get("path", "")).strip().lstrip("./")
+        path = _relative(str(item.get("path", "")))
         if not path or path in {f.path for f in files}:
+            continue
+        try:
+            # A path is model output. Reject a traversal here rather than at apply time, because
+            # the commit builder writes paths straight into the tree without another check.
+            applier.safe_join(root, path)
+        except applier.UnsafePath:
             continue
         action = str(item.get("action", "") or "").strip().lower()
         if action not in {"edit", "create", "delete"}:
