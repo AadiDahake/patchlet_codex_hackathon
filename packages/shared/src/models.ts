@@ -19,11 +19,14 @@ export const MODELS = {
   /** Code generation. */
   code: "gpt-5.6-sol",
   /**
-   * The capability compiler's batched calls: reverse task synthesis and the trajectory reward
-   * model, eight sessions per call over prose the compiler already rendered.
+   * The capability compiler's goal inference: reverse task synthesis, eight sessions per call
+   * over prose the compiler already rendered.
    */
   synthesize: "gpt-5.6-luna",
-  /** The capability compiler's one naming call, whose answer becomes the specification. */
+  /**
+   * The capability compiler's trajectory reward model and its one naming call. The reward
+   * decides how many sessions count as evidence, and the small model misgraded half of them.
+   */
   capability: "gpt-5.6-sol",
   /** Embeddings, 1536 dimensions. */
   embed: "text-embedding-3-small",

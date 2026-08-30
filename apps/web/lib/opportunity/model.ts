@@ -1,8 +1,9 @@
 /**
  * The compiler's `ModelClient`, built on the app's one provider module.
  *
- * The batched calls (reverse task synthesis, the reward model) run on the small fast model; the
- * one naming call, whose answer becomes the specification, runs on the flagship. Every reply is
+ * Goal inference runs on the small fast model. The reward model and the naming call run on the
+ * flagship: on the seeded sessions the small model graded half of the completed workflows as
+ * unfinished, and the reward is what decides how many sessions count as evidence. Every reply is
  * validated by the compiler against the schema it passed, so nothing here casts.
  */
 import type { JsonSchema, ModelClient, ModelPrompt } from "@patchlet/capability";
@@ -13,12 +14,16 @@ import { chatJson } from "../openai";
 const MAX_OUTPUT_TOKENS = 24_000;
 
 export function modelFor(purpose: ModelPrompt["purpose"]): string {
-  return purpose === "tool_synth" ? MODELS.capability : MODELS.synthesize;
+  return purpose === "f_high" ? MODELS.synthesize : MODELS.capability;
+}
+
+export function effortFor(purpose: ModelPrompt["purpose"]) {
+  return purpose === "f_high" ? EFFORT.synthesize : EFFORT.capability;
 }
 
 export function openaiModelClient(): ModelClient {
   return {
-    name: `${MODELS.synthesize} (synthesis, reward), ${MODELS.capability} (naming)`,
+    name: `${MODELS.synthesize} (synthesis), ${MODELS.capability} (reward, naming)`,
     async structured(prompt: ModelPrompt, schema: JsonSchema): Promise<unknown> {
       return chatJson<unknown>(
         modelFor(prompt.purpose),
@@ -30,7 +35,7 @@ export function openaiModelClient(): ModelClient {
         {
           name: prompt.purpose,
           maxTokens: MAX_OUTPUT_TOKENS,
-          effort: prompt.purpose === "tool_synth" ? EFFORT.capability : EFFORT.synthesize,
+          effort: effortFor(prompt.purpose),
         },
       );
     },
