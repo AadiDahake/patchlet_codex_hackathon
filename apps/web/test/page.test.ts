@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { affordanceList, dropRepeats, visibleAffordances } from "@/lib/agent/page";
+import { MAX_PAGE_TEXT, affordanceList, dropRepeats, pageText, visibleAffordances } from "@/lib/agent/page";
 import type { Affordance, PageContext, Step } from "@patchlet/shared";
 
 function affordance(id: string, name: string, extra: Partial<Affordance> = {}): Affordance {
@@ -40,5 +40,22 @@ describe("dropRepeats", () => {
       { target: "a3", caption: "Type the new username", advanceOn: "input" },
     ];
     expect(dropRepeats(steps).map((step) => step.target)).toEqual(["a1", "a3"]);
+  });
+});
+
+describe("pageText", () => {
+  it("collapses the page's own words into one line", () => {
+    const page = { ...pageOf([]), text: "  Manage Trip.\n\n  Confirmation   NVA7K2.  " };
+    expect(pageText(page)).toBe("Manage Trip. Confirmation NVA7K2.");
+  });
+
+  it("is empty when the widget sent no text, so an old widget still works", () => {
+    expect(pageText(pageOf([]))).toBe("");
+    expect(pageText({ ...pageOf([]), text: 7 as unknown as string })).toBe("");
+  });
+
+  it("clamps what a customer's site sends, because the route is public", () => {
+    const page = { ...pageOf([]), text: "word ".repeat(2000) };
+    expect(pageText(page)).toHaveLength(MAX_PAGE_TEXT);
   });
 });
