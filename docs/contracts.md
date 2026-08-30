@@ -202,7 +202,78 @@ create table visitor_memory (
 
 create index on trace_event (project_id, id);
 create index on chunk (project_id);
+
+-- The site graph (migration 0015): what Patchlet knows about the host product beyond the page in
+-- front of the user. A page is a route, a control is identified by what a person sees on it, a
+-- transition says which control on which page led where. Filled by the explorer and by the
+-- widget's live scans; read by the route planner. See docs/guidance.md.
+create table site_page (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  route text not null,                     -- normalised path, identifiers replaced by :id
+  url text not null,                       -- one concrete address the route was seen at
+  title text not null default '',
+  source text not null default 'widget',   -- 'explorer' | 'widget'
+  first_seen timestamptz not null default now(),
+  last_seen timestamptz not null default now(),
+  unique (project_id, route)
+);
+
+create table affordance (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  page_id uuid not null references site_page on delete cascade,
+  key text not null,                       -- role|name|landmark|href, see controlKey
+  role text not null,
+  name text not null,
+  landmark text,
+  href text,                               -- route the link points at
+  visible boolean not null default true,   -- on screen when the page was read, before any click
+  seen_count int not null default 1,
+  first_seen timestamptz not null default now(),
+  last_seen timestamptz not null default now(),
+  unique (page_id, key)
+);
+
+create table transition (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  from_page_id uuid not null references site_page on delete cascade,
+  affordance_id uuid not null references affordance on delete cascade,
+  to_page_id uuid not null references site_page on delete cascade,
+  kind text not null default 'navigation', -- 'navigation' | 'reveal'
+  reveals_affordance_id uuid references affordance on delete cascade,
+  source text not null default 'widget',
+  seen_count int not null default 1,
+  first_seen timestamptz not null default now(),
+  last_seen timestamptz not null default now()
+);
+
+-- A question that resolved to a control, so the same question answers with no model call.
+create table known_route (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  intent text not null,                    -- the question's concepts, sorted and joined
+  feature text not null,
+  question text not null,                  -- the wording that first resolved it
+  target_affordance_id uuid not null references affordance on delete cascade,
+  answer text not null,
+  sources jsonb,                           -- [{title, url}]
+  embedding vector(1536),                  -- of the question, for a near match on new wording
+  hit_count int not null default 0,
+  created_at timestamptz not null default now(),
+  last_used timestamptz not null default now(),
+  unique (project_id, intent)
+);
 ```
+
+Graph functions, all in migration 0015: `upsert_site_scan(project, route, url, title, source,
+controls jsonb)` writes one page and its controls in one round trip; `upsert_transition(project,
+from_route, key, to_route, kind, reveals_key, source)` writes one edge; `site_graph(project)`
+returns the whole graph as one JSON document `{pages, controls, transitions}`;
+`match_known_routes(embedding, count, project)` finds known routes by wording;
+`match_chunks_with_source` is `match_chunks` with the document title and address, so the
+documentation check can cite the article.
 
 Vector search:
 
@@ -265,11 +336,26 @@ export type Affordance = {
 };
 export type PageContext = { url: string; title: string; affordances: Affordance[] };
 
+// One instruction in a walk. `target` is the live affordance id on the page the widget scanned;
+// it is null for a step on a later page, which the widget binds by `control` when it gets there.
 export type Step = {
-  target: string;
+  target: string | null;
   caption: string;
   advanceOn: "click" | "input" | "navigation" | "manual";
+  control?: { role: string; name: string; landmark?: string; href?: string; route: string };
 };
+
+// The site graph as the planner reads it. A control's identity is role, accessible name, landmark
+// and link target, never a selector.
+export type SitePage = { route: string; url: string; title: string };
+export type SiteControl = { key: string; route: string; role: string; name: string; landmark?: string; href?: string; visible: boolean };
+export type SiteTransition = { from: string; key: string; to: string; kind: "navigation" | "reveal"; reveals?: string };
+export type SiteGraph = { pages: SitePage[]; controls: SiteControl[]; transitions: SiteTransition[] };
+
+// How a step plan was made, and how many steps it has, fixed for the whole walk.
+export type PlanSource = "graph" | "cached" | "page";
+export type PlanSummary = { source: PlanSource; total: number; destination?: { route: string; title: string } };
+export type AnswerSource = { title: string; url: string | null };
 
 export type ProbeName = "docs" | "interface" | "repository";
 export type ProbeResult = {
@@ -331,6 +417,9 @@ export type ChatEvent =
       steps: Step[] | null;
       escalation: EscalationOffer;   // { offered: true, request } | { offered: false, reason? }
       noted?: boolean;               // the gap was recorded for the developers without being asked
+      plan?: PlanSummary;            // where the steps came from and the count, fixed for the walk
+      sources?: AnswerSource[];      // the help articles the answer cites
+      routeChanged?: boolean;        // a continuation changed the route, so the count changed
     }
   | { type: "error"; message: string };
 
@@ -364,9 +453,16 @@ export type TraceEvent = {
 
 Also exported:
 
-- `validatePlan(steps, affordances)` rejects the whole plan if any `target` is not an affordance id
-  or any caption exceeds 14 words. Returns `Step[] | null`.
+- `validatePlan(steps, affordances, maxSteps?)` rejects the whole plan if any live `target` is not
+  an affordance id, if a later-page step (`target: null`) does not name its `control`, if the first
+  step has no live id, or if any caption exceeds 14 words. Returns `Step[] | null`.
 - `routeProbes(results, thresholds)` returns `"answer" | "hedge" | "absent"`.
+- `routeOf(url)`, `hrefRoute(href, pageUrl)`, `controlKey(ref)`, `controlRefOf(affordance, pageUrl)`,
+  `sameControl(a, b)`, `captionFor(ref)`: the identity of a page and of a control, shared by the
+  explorer, the widget and the planner.
+- `planRoute(graph, current, target, captions?)`: the shortest path over the graph from the current
+  page to a control, with reveal steps where the page as scanned hides a control behind a tab or a
+  menu. `searchControls(graph, feature)`, `validateRoute(steps, graph)`, `graphSize(graph)`.
 - `tokenize(text)` and the keyword helpers used by both the interface probe and the widget's
   affordance ranking, so page-side ranking and server-side scoring always agree.
 - `MODELS` and `EFFORT`, the model ids and reasoning efforts in section 5, and
@@ -385,7 +481,10 @@ one account can never read another's sources, conversations, escalations or trac
 
 | Route | Body / query | Returns |
 |---|---|---|
-| `POST /api/chat` | `{key, conversationId?, visitorId?, question, page: PageContext, continueFrom?}` | SSE of `ChatEvent`; each `data:` line is one JSON event, `event:` is its type |
+| `POST /api/chat` | `{key, conversationId?, visitorId?, question, page: PageContext, continueFrom?}` | SSE of `ChatEvent`; each `data:` line is one JSON event, `event:` is its type. With `continueFrom`, one `answer` event with the remaining steps from the current page and `routeChanged` |
+| `POST /api/site/observe` | `{key, page: PageContext, transition?: {fromUrl, fromTitle, control: {role, name, landmark?, href?}}}` | `{ok: true}`; records the page in the site graph and the move the user made to reach it |
+| `POST /api/site/explore` | - (console) | `{summary: {pages, controls, transitions, reveals, formsTried, visited, skipped, durationMs}}`; explores `project.site_url` with a headless browser, 400 without a site address |
+| `GET /api/site/map` | - (console) | `{graph, routes, siteUrl}`: the site graph with last-seen times and the known routes |
 | `POST /api/escalate` | `{key, conversationId, messageId, visitorId?}` | `{escalationId, groupId, status}`, or 409 `{error, reason: "no_repository"}` when the project has no repository bound |
 | `GET /api/escalations/:id` | `?key=` required, must be the escalation's project | `{id, status, issueUrl, prUrl, deploymentUrl, request, approval, createdAt}` |
 | `POST /api/transcribe` | multipart `key`, `file` (audio/webm or mp3) | `{text}` |
@@ -449,16 +548,22 @@ Forge rows carry `source: "forge"`; the persona's `tool`, `artifact` and `model`
 `apps/web/lib/agent`. One chat turn:
 
 1. Insert the conversation if it is new, insert the user message, emit `conversation`.
-2. **Understand** with `MODELS.understand` and a JSON schema: `{intent, feature, keywords[]}`, where
-   `feature` is the short noun phrase the user is asking about ("dark mode", "changing the
-   username"). Load what the agent remembers about this `visitorId` (at most 20 facts, oldest
-   first) and emit `understanding` with them as `memory`.
-3. **Three probes in parallel.** Each emits `probe running`, then `probe done`, and writes a
+2. **Record and recall.** The page the question was asked on is written into the site graph
+   (`recordScan`), so a route can start from it. The question's intent key (its concepts, sorted)
+   is looked up in `known_route`; a miss is retried by the question's embedding at cosine 0.92 or
+   above once it is in flight. A hit plans the route from the current page over the graph, emits
+   `understanding` and `answer` (`plan.source: "cached"`) and returns: no model call at all.
+3. **Understand** with `MODELS.understand` and a JSON schema: `{intent, feature}`, where `feature`
+   names the capability in the user's own terms ("changing a seat", "finding seats together"). Load
+   what the agent remembers about this `visitorId` (at most 20 facts, oldest first) and emit
+   `understanding` with them as `memory`.
+4. **Three probes in parallel.** Each emits `probe running`, then `probe done`, and writes a
    `trace_event` with source `agent` and kind `probe`.
-   - **docs**: embed the question, call `match_chunks` for the top 6. The score is the top
-     similarity, multiplied by `0.6 + 0.4 * confidence` when the chunk carries an OCR confidence.
-     Hit when the score is at least `settings.docsThreshold` (default 0.70). Evidence is
-     `[{documentTitle, heading, snippet, similarity, confidence}]`. With no chunks at all the probe
+   - **docs**: embed the question, call `match_chunks_with_source` for the top 6. The score is the
+     top similarity, multiplied by `0.6 + 0.4 * confidence` when the chunk carries an OCR
+     confidence. Hit when the score is at least `settings.docsThreshold` (default 0.70) and the
+     passage uses a third of the question's concepts. Evidence is `[{documentTitle, url, heading,
+     snippet, similarity}]`, so the answer can cite the article. With no chunks at all the probe
      misses and says the knowledge base is empty.
    - **interface**: pure local matching, no model call. Token overlap between the keywords plus the
      feature and each affordance's name, text, landmark and href, with simple stemming and a small
@@ -471,16 +576,24 @@ Forge rows carry `source: "forge"`; the persona's `tool`, `artifact` and `model`
      `GET /repos/{repo}/contents/{path}`, count keyword occurrences. Hit when a path token matches or
      total occurrences reach 3. Evidence is `[{path, matches}]`. With no repository connected the
      probe misses and says so.
-4. **Route** with `routeProbes`. A documentation or interface hit gives `answer`. A repository-only
+5. **Route** with `routeProbes`. A documentation or interface hit gives `answer`. A repository-only
    hit gives `hedge`. Nothing at all asks `MODELS.verdict` to confirm absence from the three
    summaries, returning `{exists, confidence, reasoning}`: `exists: false` gives `absent`, otherwise
    `hedge`. Emit `verdict` and write the trace event.
-5. **Answer.**
-   - `answer`: `MODELS.answer` with a JSON schema, `{answer, steps: [{target, caption, advanceOn}]}`.
-     The prompt carries the documentation evidence and the full affordance list (id, role, name,
-     landmark), and the rules: `target` must be one of the listed ids, at most 5 steps, captions at
-     most 12 words, imperative ("Open the account menu"). Validate with `validatePlan`; when it
-     rejects, keep the prose and send `steps: null`.
+6. **Answer.**
+   - `answer` with a graph: `candidatesFor` gathers the controls the graph search, the documentation
+     passages and the current page point at, one per identity, and computes the route to each with
+     `planRoute` first. `MODELS.plan` then chooses the target, writes one or two sentences that
+     hold from any page and name the article used, and writes one caption per step of the chosen
+     route (`{target, answer, captions}`); it never counts steps. The route is bound to the live
+     page with `bindFirstStep` (the planner's control, else a visible twin of it, else the control
+     off screen) and checked with `validatePlan(steps, affordances, 8)`; captions that fail are
+     replaced by ones written from the control's role and name. The answer carries
+     `plan: {source: "graph", total}` and `sources`, and the target is saved as a known route. When
+     the model names no target but the documentation hit, the answer is the prose with no steps.
+   - `answer` without a graph route: `MODELS.plan` with `{answer, steps: [{target, caption,
+     advanceOn}]}` over the documentation evidence and the current page's affordance list, at most
+     5 steps, captions at most 12 words, `validatePlan`; `plan.source: "page"`.
    - `hedge`: the same model, an honest answer that the feature could not be confirmed, no steps,
      escalation offered with a drafted request.
    - `absent`: an apology, a plain statement, and an offer, for example "Dark mode is not available
@@ -490,12 +603,23 @@ Forge rows carry `source: "forge"`; the persona's `tool`, `artifact` and `model`
      words (verified to be a substring of the user message, otherwise empty), and a rationale.
 
    Persist the assistant message with its steps, probes, verdict and feature request. Emit `answer`.
-6. Every stage writes `trace_event` rows, which is what makes the console's Activity page show the
-   chat-side reasoning live.
-7. Close the conversation out for the console: `outcome` is `solved` when the answer carried
+7. Every stage writes `trace_event` rows, which is what makes the console's Activity page show the
+   chat-side reasoning live. The planner writes `decision` rows: "Known route", "Planned the
+   route", "Re-planned the route over the product map", and "The route could not start from this
+   page" with the reason and the scanned controls.
+8. Close the conversation out for the console: `outcome` is `solved` when the answer carried
    guidance steps, `missing_feature` when the verdict was `absent`, and `unresolved` otherwise;
    `summary` is one sentence written with `MODELS.understand`. Both are best-effort and never
-   fail the turn.
+   fail the turn. A known route sets them without a model.
+
+### Continuing a walk
+
+`POST /api/chat` with `continueFrom` and `conversationId` is what the widget sends when the
+control it expected is not on the page after a re-scan. `continueGuidance` records the page,
+reads the last answer's target (the `control` of its last step) and recomputes the route over the
+graph from the page as it is now, with no model. Only when the graph has no route from this page
+does one `MODELS.plan` call read the page and name the steps that are left. The answer carries
+`routeChanged: true` whenever the remaining steps differ from the ones the user was told.
 
 The console links back to the customer's site with `?patchlet_ask=<question>`; the widget reads that
 parameter on load, opens, and asks the question once.

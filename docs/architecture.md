@@ -110,17 +110,30 @@ starts the next one.
 `docs/capability-compiler.md` is the compiler in full, stage by stage, with the research each stage
 credits and the IR field by field. `docs/PLAN.md` is the demo the whole loop is built for.
 
+## The site graph
+
+Patchlet keeps a map of the host product: pages as routes, controls identified by role,
+accessible name, landmark and link target (never a selector), and transitions that say which
+control on which page led to which page, or revealed which control on the same page. The
+explorer fills it once with a headless browser running the widget's own scanner; the widget keeps
+it current from every page it scans and every move a visitor makes. The console's "Product map"
+page shows it. `docs/guidance.md` has the design and the measurements.
+
 ## One chat turn
 
 A question travels through a fixed pipeline. Every stage emits an SSE `ChatEvent` to the widget and
 writes a `trace_event` row so the console can replay the same reasoning live.
 
-1. **Understand.** A small fast model extracts `{intent, feature, keywords[]}`. `feature` is the
-   short noun phrase the user is asking about, which is what the later stages search for.
-2. **Three probes, in parallel.** Each answers "does this exist?" from a different angle.
-   - `docs` ("Checking the documentation") embeds the question and searches the project's chunks
-     with `match_chunks`. A scanned passage is discounted by how legibly the reader saw it, so a
-     blurry scan cannot outvote clean text.
+1. **Recall.** The page joins the graph, and the question's intent is looked up among the known
+   routes. A question asked before resolves to its control, the route from this page is read off
+   the graph, and the answer streams at once with no model call.
+2. **Understand.** A small fast model names the capability in the user's own terms ("changing a
+   seat", "finding seats together"), which is what the later stages search for.
+3. **Three probes, in parallel.** Each answers "does this exist?" from a different angle.
+   - `docs` ("Checking the documentation") embeds the question and searches the project's chunks,
+     and names the article and address of what it found so the answer can cite it. A scanned
+     passage is discounted by how legibly the reader saw it, so a blurry scan cannot outvote clean
+     text.
    - `interface` ("Looking at this page") is pure local matching of the keywords against the
      affordances the widget scanned off the live page. No model call, so it is fast and
      deterministic.
@@ -128,13 +141,17 @@ writes a `trace_event` row so the console can replay the same reasoning live.
      keyword, reads the best candidates, and counts occurrences. The key stays `repository`; the
      user-facing label names the capability, because a customer is asking what the product can do,
      not what is in a source tree.
-3. **Route.** `routeProbes` decides without a model where it can: a documentation or interface hit
+4. **Route.** `routeProbes` decides without a model where it can: a documentation or interface hit
    means `answer`, a repository-only hit means `hedge`. When all three come back empty a reasoning
    model is asked to confirm absence, and only then does the turn become `absent`.
-4. **Answer.** For `answer`, a larger model returns prose plus a step plan whose targets must be
-   affordance ids the widget actually sent. `validatePlan` rejects the whole plan if any id is
-   unknown or any caption is too long, in which case the prose survives and the steps are dropped.
-   For `absent`, the model drafts a `FeatureRequest` and the widget offers to file it.
+5. **Answer.** For `answer`, the candidate controls are gathered from the graph search, the
+   documentation and the current page, and the route to each is computed over the graph first.
+   The model chooses the target, writes the prose and writes the captions; it never counts steps,
+   so "3 steps" is the length of the path. The first step is bound to a live affordance id the
+   widget sent; later steps carry the control's identity and are bound by the widget when it gets
+   there. `validatePlan` rejects the plan if a live id is unknown or a caption is too long. The
+   resolved target becomes a known route. For `absent`, the model drafts a `FeatureRequest` and the
+   widget offers to file it.
 
 The three probes are the product. Answering confidently is easy; proving absence is what earns the
 right to open a pull request.
@@ -194,9 +211,10 @@ worker, `forge` for the sandbox engine.
 ## Data
 
 Postgres with `pgvector`. One `project` row per customer, `document` and `chunk` for the knowledge
-base, `conversation` and `message` for chat history, `escalation` for the build pipeline,
-`candidate` for each sandbox attempt of a forge run, `deployment_outcome` for what happened after
-a capability shipped, and `trace_event` for everything observable. Row level security is enabled on every table with no
+base, `site_page`, `affordance`, `transition` and `known_route` for the site graph, `conversation`
+and `message` for chat history, `escalation` for the build pipeline, `candidate` for each sandbox
+attempt of a forge run, `deployment_outcome` for what happened after a capability shipped, and
+`trace_event` for everything observable. Row level security is enabled on every table with no
 policies; the application only ever connects with the service role, which bypasses it. See
 `docs/contracts.md` for the full schema.
 
