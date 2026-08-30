@@ -19,10 +19,13 @@ different from a support chatbot.
    the higher it rises, and once it has real weight behind it the change gets drafted without anyone
    asking twice.
 
-Behind the second point sits the evidence loop: PostHog says how many other customers worked around
-the same gap, a capability compiler turns those trajectories into one semantic capability, and Codex
-builds and verifies it inside isolated Runloop sandboxes before a human ever sees the pull request.
-`docs/PLAN.md` is the full plan and the demo script it is built for.
+Behind the second point sits the evidence loop, and it runs in four stages. **User workflows**: real
+sessions and replays from PostHog, where customers already reached the goal the hard way. **Inferred
+intent**: the goal behind each session, recovered from the trajectory. **Semantic capability**: one
+capability at the right granularity, not a list of clicks. **Verified implementation**: Codex builds
+and verifies it inside isolated Runloop sandboxes, and a human approves the pull request. Then
+PostHog again, after the launch, to say whether the change worked. `docs/PLAN.md` is the full plan
+and the demo it is built for.
 
 The sponsors are infrastructure. **PostHog** supplies the behavioural evidence before and after the
 change. **Codex** is the implementation intelligence. **Reflex / Runloop** gives Codex isolated,
@@ -33,49 +36,85 @@ widget with a single script tag.
 
 ## Architecture
 
+```text
+              host page (NovaAir)
+              +-----------------------------------------------+
+              |  <script src=".../widget.js"                  |
+              |          data-key="pk_...">                   |
+              |  posthog-js: events + session recording       |
+              |                                               |
+              |      +---------------------------------+      |
+              |      |  Patchlet widget (shadow DOM)   |      |
+              |      |  chat, three checks,            |      |
+              |      |  spotlight overlay, voice       |      |
+              |      +----------------+----------------+      |
+              +-----------------------+-----------------+-----+
+                                      |                 |
+                                      |                 | events, session recordings
+               HTTPS, embed key, CORS |                 v
+                                      |      +----------+----------+
+                                      |      |  PostHog            |  the evidence, before the PR
+                                      |      +----------+----------+
+                                      |                 | HogQL query + session recording API:
+                                      |                 | the trajectories behind the gap
+                                      v                 v
+        +--------------------------------------------------------------+
+        |  apps/web  (Next.js, Vercel project `patchlet-codex`)        |
+        |                                                              |
+        |  /api/chat  SSE   understand -> 3 probes -> verdict          |
+        |                   -> answer + step plan                      |
+        |  /api/escalate    starts the escalation engine               |
+        |  /api/trace       + /api/trace/stream (console live)         |
+        |  /api/documents   ingest, read, embed                        |
+        |  /console         overview, knowledge, repository, activity  |
+        |                                                              |
+        |  lib/posthog  trajectories   packages/capability  the IR     |
+        |  lib/agent    the chat turn  lib/forge            sandboxes  |
+        +------+---------------------+---------------------+-----------+
+               |                     |                     |
+               v                     v                     v
+     +-------------------+ +-------------------+ +-------------------+
+     | Supabase Postgres | | OpenAI API        | | GitHub API        |
+     | + pgvector        | | chat, embeddings, | | trees, blobs,     |
+     | trace_event       | | vision, STT, TTS  | | issues, PRs       |
+     +-------------------+ +-------------------+ +-------------------+
+               |
+               v
+        +--------------------------------------------------------------+
+        |  the escalation engine                                       |
+        |  local:  services/worker (Python, uv), one process           |
+        |  forge:  Reflex personas running Codex in Runloop sandboxes  |
+        |  file issue -> draft -> draft PR -> human approval -> merge  |
+        +------------------------------+-------------------------------+
+                                       |
+                                       v
+                       the deploy lands, NovaAir changes
+                                       |
+                                       | events, session recordings
+                                       v
+                            +----------+----------+
+                            |  PostHog            |  the outcome, after the launch
+                            +----------+----------+
+                                       |
+                                       | adoption, completion, support volume
+                                       v
+                               apps/web /console
 ```
-                 host page (NovaAir)
-                 +--------------------------------------+
-                 |  <script src=".../widget.js"          |
-                 |          data-key="pk_...">           |
-                 |                                       |
-                 |   +-------------------------------+   |
-                 |   |  Patchlet widget (shadow DOM) |   |
-                 |   |  chat, three checks,          |   |
-                 |   |  spotlight overlay, voice     |   |
-                 |   +---------------+---------------+   |
-                 +-------------------|-------------------+
-                                     | HTTPS, embed key, CORS
-                                     v
-        +--------------------------------------------------------+
-        |  apps/web  (Next.js, Vercel project `patchlet-codex`)   |
-        |                                                        |
-        |  /api/chat  SSE   understand -> 3 probes -> verdict     |
-        |                   -> answer + step plan                 |
-        |  /api/escalate    starts the escalation engine          |
-        |  /api/trace       + /api/trace/stream (console live)    |
-        |  /api/documents   ingest, read, embed                   |
-        |  /console         overview, knowledge, repository,      |
-        |                   activity                              |
-        +------+--------------------+--------------------+--------+
-               |                    |                    |
-               v                    v                    v
-     +---------------+   +--------------------+   +----------------+
-     | Supabase      |   | OpenAI API         |   | GitHub API     |
-     | Postgres      |   | chat, embeddings,  |   | trees, blobs,  |
-     | + pgvector    |   | vision, STT, TTS   |   | issues, PRs    |
-     | trace_event   |   |                    |   |                |
-     +-------^-------+   +---------^----------+   +-------^--------+
-             |                     |                      |
-             |            +--------+----------------------+
-             |            |
-        +----+------------+----------------------------------+
-        |  services/worker (Python, uv)                       |
-        |  file issue -> inspect repo -> draft code ->        |
-        |  open draft PR -> wait for approval -> merge ->     |
-        |  watch the deploy                                   |
-        +-----------------------------------------------------+
+
+The loop passes through PostHog twice: the host product sends it events and session recordings,
+Patchlet queries it for the trajectories behind a gap, and after the launch it queries it again for
+the outcome. Between those two reads sit four stages, always in this order.
+
+```text
+user workflows           PostHog sessions and replays on the host product
+inferred intent          OS-Genesis reverse task synthesis      packages/capability
+semantic capability      ToolCUA granularity, ASIL-shaped IR    packages/capability
+verified implementation  Reflex personas run Codex in Runloop sandboxes, then a human-approved PR
+the outcome              PostHog again: adoption, completion, support volume
 ```
+
+`docs/architecture.md` walks the loop stage by stage; `docs/capability-compiler.md` is the compiler
+in full.
 
 ## Repository layout
 
