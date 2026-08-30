@@ -20,7 +20,7 @@ const value = (name) => {
 
 const BASE = (process.env.PATCHLET_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const TOKEN = process.env.PATCHLET_CONSOLE_TOKEN;
-const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
+const COLOR = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 const BACKFILL = Number(value("backfill") ?? "120");
 
 const filters = new URLSearchParams();
