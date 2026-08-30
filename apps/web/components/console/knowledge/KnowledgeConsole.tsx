@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from "react";
 import { AgentLive } from "@/components/console/AgentLive";
 import type { ConsoleDocument } from "@/lib/ingest/types";
 import { AddSource } from "./AddSource";
+import { ImportHelpCenter } from "./ImportHelpCenter";
 import { PreviewDrawer } from "./PreviewDrawer";
 import { RecreateIndex } from "./RecreateIndex";
 import { SourceList } from "./SourceList";
@@ -106,10 +107,20 @@ export function KnowledgeConsole({ initialDocuments, siteUrl, repoBound }: Props
     [upsert],
   );
 
+  const imported = useCallback(
+    (imports: ConsoleDocument[]) => {
+      setError("");
+      setAddedHere((value) => value + imports.length);
+      for (const document of imports) upsert(document);
+    },
+    [upsert],
+  );
+
   return (
     <>
       <div className="kb-bar mb-6">
         <AgentLive />
+        <ImportHelpCenter siteUrl={siteUrl} onImported={imported} onError={setError} />
         <RecreateIndex documents={documents} onDocument={upsert} />
       </div>
 
