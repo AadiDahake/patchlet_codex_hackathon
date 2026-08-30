@@ -124,6 +124,9 @@ console pages never see an API key; the only public identifier is the project's 
 - Clear names over short names. Comments explain why, not what.
 - No em dashes. Use a plain dash.
 - Status is text, not a coloured pill. See the design notes in `docs/architecture.md`.
+- Every colour, radius, shadow and blur is a token in `apps/web/app/globals.css`; the widget has
+  its own copy in `packages/widget/src/styles.ts`. Use the classes there rather than styling a
+  page on its own, and never write a literal colour in a component.
 
 ## Commits
 
@@ -145,7 +148,11 @@ npm run typecheck    # must pass before you push
 npm test             # must pass before you push
 npm run db:migrate   # apply supabase/migrations/*.sql in order
 npm run db:seed      # idempotent seed, prints the embed key when it creates one
+node scripts/screenshots.mjs pages <dir> name=url...   # 1440x900 captures, private headless Chromium
 ```
+
+Screenshots come from `scripts/screenshots.mjs` (Playwright, one private browser per run), never
+from a shared browser session. `docs/screenshots/` holds the captures a pull request refers to.
 
 Anything that needs credentials expects them in the environment. Supply them with your own secret
 manager rather than a file in the working tree.
