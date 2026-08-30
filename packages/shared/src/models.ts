@@ -18,6 +18,13 @@ export const MODELS = {
   verdict: "gpt-5.6-terra",
   /** Code generation. */
   code: "gpt-5.6-sol",
+  /**
+   * The capability compiler's batched calls: reverse task synthesis and the trajectory reward
+   * model, eight sessions per call over prose the compiler already rendered.
+   */
+  synthesize: "gpt-5.6-luna",
+  /** The capability compiler's one naming call, whose answer becomes the specification. */
+  capability: "gpt-5.6-sol",
   /** Embeddings, 1536 dimensions. */
   embed: "text-embedding-3-small",
   /** Document reading: one vision call over a page image or a PDF. */
@@ -37,7 +44,10 @@ export type ModelId = (typeof MODELS)[keyof typeof MODELS];
  */
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export const EFFORT: Record<"understand" | "plan" | "resolve" | "answer" | "verdict" | "ocr", ReasoningEffort> = {
+export const EFFORT: Record<
+  "understand" | "plan" | "resolve" | "answer" | "verdict" | "ocr" | "synthesize" | "capability",
+  ReasoningEffort
+> = {
   understand: "low",
   plan: "low",
   /**
@@ -48,6 +58,8 @@ export const EFFORT: Record<"understand" | "plan" | "resolve" | "answer" | "verd
   answer: "medium",
   verdict: "high",
   ocr: "low",
+  synthesize: "low",
+  capability: "medium",
 };
 
 /** Embedding width the schema and `match_chunks` are built around. */

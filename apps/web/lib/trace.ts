@@ -5,6 +5,8 @@ export type TraceInput = {
   projectId: string;
   conversationId?: string | null;
   escalationId?: string | null;
+  /** The opportunity this row belongs to, when the writer knows it. */
+  groupId?: string | null;
   source: TraceEvent["source"];
   kind: TraceEvent["kind"];
   status?: TraceEvent["status"];
@@ -23,6 +25,7 @@ export async function emitTrace(input: TraceInput): Promise<void> {
     project_id: input.projectId,
     conversation_id: input.conversationId ?? null,
     escalation_id: input.escalationId ?? null,
+    group_id: input.groupId ?? null,
     source: input.source,
     kind: input.kind,
     status: input.status ?? "ok",
@@ -40,6 +43,7 @@ export function toTraceEvent(row: Record<string, unknown>): TraceEvent {
     projectId: String(row.project_id),
     conversationId: row.conversation_id === null ? null : String(row.conversation_id),
     escalationId: row.escalation_id === null ? null : String(row.escalation_id),
+    groupId: row.group_id === null || row.group_id === undefined ? null : String(row.group_id),
     source: row.source as TraceEvent["source"],
     kind: row.kind as TraceEvent["kind"],
     status: row.status as TraceEvent["status"],
