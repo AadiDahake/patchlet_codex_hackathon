@@ -3,6 +3,7 @@ import type {
   ChatEvent,
   EscalationOffer,
   FeatureRequest,
+  MessageIntent,
   PlanSummary,
   ProbeName,
   ProbeResult,
@@ -55,6 +56,8 @@ function dataOf(frame: string): string | null {
 
 const PROBE_NAMES: readonly string[] = ['docs', 'interface', 'repository'];
 
+const INTENTS: readonly MessageIntent[] = ['chat', 'page', 'product', 'mixed'];
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -75,7 +78,9 @@ export function toChatEvent(payload: string): ChatEvent | null {
 
     case 'understanding': {
       if (typeof parsed.feature !== 'string') return null;
-      const intent = parsed.intent === 'howto' || parsed.intent === 'feature' ? parsed.intent : 'other';
+      // Anything the widget does not know is treated as a question about the product, which is
+      // the kind whose events keep coming after this one.
+      const intent = INTENTS.find((candidate) => candidate === parsed.intent) ?? 'product';
       const memory = Array.isArray(parsed.memory)
         ? parsed.memory.filter((fact): fact is string => typeof fact === 'string')
         : [];

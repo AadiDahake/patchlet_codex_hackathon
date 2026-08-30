@@ -83,8 +83,27 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
 
   const wantsTogether = /together|family|same row|next to|adjacent|beside/i.test(question);
   const wantsSeat = !wantsTogether && /seat|move .*passenger/i.test(question);
+  // A greeting or a question about the assistant runs no check and offers nothing to report.
+  const chatting =
+    /^\s*(hi|hey|hello|yo|thanks|thank you|good (morning|afternoon|evening))\b/i.test(question) ||
+    /can you hear me|are you (a )?(real|human|bot)|who are you/i.test(question);
 
   send({ type: 'conversation', conversationId, messageId: randomUUID() });
+
+  if (chatting) {
+    await sleep(between(150, 300));
+    send({ type: 'understanding', feature: '', intent: 'chat', memory: [] });
+    await sleep(between(200, 400));
+    send({
+      type: 'answer',
+      text: 'I can hear you. Ask me how to do something on this page and I will point at the control.',
+      steps: null,
+      escalation: { offered: false },
+      noted: false,
+    });
+    response.end();
+    return;
+  }
 
   // A repeat of a seat question is a known route: the plan comes straight off the graph.
   if (wantsSeat && continueFrom > 0) {
@@ -97,7 +116,7 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
   send({
     type: 'understanding',
     feature: wantsTogether ? 'automatic family seat selection' : wantsSeat ? 'changing a seat' : question.slice(0, 40),
-    intent: wantsTogether ? 'feature' : 'howto',
+    intent: 'product',
     memory: ['The visitor travels with two children.'],
   });
 

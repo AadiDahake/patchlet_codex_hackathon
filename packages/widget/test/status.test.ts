@@ -17,7 +17,7 @@ function probeDone(probe: ProbeName): ChatEvent {
 /** The events one real turn emits, in the order the API sends them. */
 const TURN: ChatEvent[] = [
   { type: 'conversation', conversationId: 'c1', messageId: 'm1' },
-  { type: 'understanding', feature: 'dark mode', intent: 'feature', memory: [] },
+  { type: 'understanding', feature: 'dark mode', intent: 'product', memory: [] },
   { type: 'probe', probe: 'docs', status: 'running' },
   { type: 'probe', probe: 'interface', status: 'running' },
   { type: 'probe', probe: 'repository', status: 'running' },
@@ -51,6 +51,16 @@ describe('the working status', () => {
       'deciding',
       'writing',
     ]);
+  });
+
+  it('goes straight to writing when the message runs no check', () => {
+    for (const intent of ['chat', 'page'] as const) {
+      const seen = replay([
+        { type: 'conversation', conversationId: 'c1', messageId: 'm1' },
+        { type: 'understanding', feature: '', intent, memory: [] },
+      ]);
+      expect(seen, intent).toEqual(['reading', 'writing']);
+    }
   });
 
   it('starts by saying it is reading the question', () => {

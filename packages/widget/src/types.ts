@@ -3,8 +3,8 @@
 // disagree on what a step is; nothing else in the widget imports the contract from
 // anywhere but here.
 
-export type { AnswerSource, PlanSource, PlanSummary, Step } from '@patchlet/shared';
-import type { AnswerSource, PlanSummary, Step } from '@patchlet/shared';
+export type { AnswerSource, MessageIntent, PlanSource, PlanSummary, Step } from '@patchlet/shared';
+import type { AnswerSource, MessageIntent, PlanSummary, Step } from '@patchlet/shared';
 
 export type Affordance = {
   id: string;
@@ -18,7 +18,13 @@ export type Affordance = {
   state?: string;
 };
 
-export type PageContext = { url: string; title: string; affordances: Affordance[] };
+export type PageContext = {
+  url: string;
+  title: string;
+  affordances: Affordance[];
+  /** The visible text of the page, collapsed and bounded by the scanner. */
+  text?: string;
+};
 
 export type ProbeName = 'docs' | 'interface' | 'repository';
 
@@ -57,7 +63,7 @@ export type EscalationOffer =
 
 export type ChatEvent =
   | { type: 'conversation'; conversationId: string; messageId: string }
-  | { type: 'understanding'; feature: string; intent: 'howto' | 'feature' | 'other'; memory: string[] }
+  | { type: 'understanding'; feature: string; intent: MessageIntent; memory: string[] }
   | { type: 'probe'; probe: ProbeName; status: 'running' }
   | { type: 'probe'; probe: ProbeName; status: 'done'; result: ProbeResult }
   | { type: 'verdict'; verdict: Verdict }
