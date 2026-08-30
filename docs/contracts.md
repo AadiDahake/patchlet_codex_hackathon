@@ -843,13 +843,16 @@ what it may answer:
 - **The gates are the target repository's own.** `npm ci` (cached by lockfile hash), then every
   script in `GATES` that the target's `package.json` defines, cheapest first: `npm run typecheck`,
   `npm test`, `npm run build`, in the clone with the drafted files applied and the planned deletions
-  removed. A failure goes back to the editor for the files the output names, up to 3 repairs, then a
-  fresh candidate, up to 2 candidates. The repair also carries at most two files the gate named that
-  the plan does not touch, read from the clone, because that is usually the test stating what the
-  code has to satisfy. Only a planned file is ever rewritten, so a contract is never edited to pass. `npm test` earns its place: a draft passed typecheck and build
-  and still broke NovaAir's `tests/seat-party.test.ts`, adding the two exports that repository
-  documents with a signature the contract test does not call. `e2e` is never a gate, because it needs
-  a browser and a running server.
+  removed. `npm test` earns its place: a draft passed typecheck and build and still broke NovaAir's
+  `tests/seat-party.test.ts`, adding the two exports that repository documents with a signature the
+  contract test does not call. `e2e` is never a gate, because it needs a browser and a running
+  server.
+- **A repair sees the file the gate named.** A failure goes back to the editor for the files the
+  output names, up to 3 repairs, then a fresh candidate, up to 2 candidates. It also carries at most
+  two files the gate named that the plan does not touch, read from the clone, because that is
+  usually the test stating what the code has to satisfy, and a stack trace alone does not carry the
+  signature it is being called with. Only a planned file is ever rewritten, so a contract is never
+  edited into agreement.
 - **The pull request body** names the request, the user's quote, the count line
   (`Requested N times, M by users`), every changed file and every deleted one.
 - **The trace ends on the pull request and the pause.** `open_draft_pr` writes the gate comment and
