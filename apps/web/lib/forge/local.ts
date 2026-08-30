@@ -165,7 +165,9 @@ export class LocalStrategy implements SandboxStrategy {
   constructor(private readonly options: LocalStrategyOptions = {}) {}
 
   cacheRoot(): string {
-    return resolve(this.options.cacheDir ?? join(tmpdir(), "patchlet-forge"));
+    // A runtime location on the machine that runs the app, never a bundled asset, so the build's
+    // file tracer has nothing to follow here.
+    return resolve(/*turbopackIgnore: true*/ this.options.cacheDir ?? join(tmpdir(), "patchlet-forge"));
   }
 
   private log(line: string): void {
