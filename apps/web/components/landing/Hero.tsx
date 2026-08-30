@@ -1,10 +1,9 @@
-import Image from "next/image";
 import Link from "next/link";
 
 export function Hero() {
   return (
     <section id="top" className="relative">
-      <div className="mx-auto flex max-w-6xl flex-col items-center px-6 pt-24 pb-14 text-center lg:px-10 lg:pt-32 lg:pb-16">
+      <div className="mx-auto flex max-w-6xl flex-col items-center px-6 pt-24 pb-24 text-center lg:px-10 lg:pt-32 lg:pb-32">
         <h1 className="max-w-4xl font-display text-4xl leading-[1.12] tracking-tight text-ink sm:text-5xl lg:text-[3.75rem]">
           Support that answers honestly, and{" "}
           <span className="font-medium text-accent italic">builds</span> what it could not find.
@@ -31,23 +30,6 @@ export function Hero() {
             </span>
           </a>
         </div>
-      </div>
-
-      {/* The product itself: the widget on an airline's page, pointing at the control it found. */}
-      <div className="mx-auto max-w-6xl px-6 pb-24 lg:px-10 lg:pb-32">
-        <figure className="product-shot">
-          <Image
-            src="/landing/widget-on-novaair.webp"
-            width={1350}
-            height={800}
-            priority
-            alt="The Patchlet widget on NovaAir's Manage Trip page. A ring marks the Change seats button and a caption reads Select Change seats."
-          />
-          <figcaption className="product-shot__caption">
-            Asked &ldquo;Where do I change my seat?&rdquo; on NovaAir, the widget points at Change
-            seats.
-          </figcaption>
-        </figure>
       </div>
     </section>
   );
