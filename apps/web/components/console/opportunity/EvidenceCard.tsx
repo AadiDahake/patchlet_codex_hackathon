@@ -20,6 +20,8 @@ export function EvidenceCard({
   status: OpportunityDetail["status"];
 }) {
   const running = discovery?.status === "queued" || discovery?.status === "running";
+  // Before a specification exists the count is the mined pool; after, the sessions behind the intent.
+  const compiled = !["discovering", "failed", "not_warranted"].includes(status);
 
   return (
     <section className="panel">
@@ -43,7 +45,11 @@ export function EvidenceCard({
 
       {evidence.sessionCount !== null ? (
         <div className="opp-facts">
-          <Fact value={String(evidence.sessionCount)} label="Matching PostHog sessions" note="Successful sessions that share the inferred intent." />
+          <Fact
+            value={String(evidence.sessionCount)}
+            label="Matching PostHog sessions"
+            note={compiled ? "Successful sessions that share the inferred intent." : "Successful seat-map sessions in the window, before the intent is inferred."}
+          />
           <Fact
             value={formatMedian(evidence.medianInteractions)}
             label="Median seat-map interactions"
