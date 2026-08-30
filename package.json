@@ -23,6 +23,8 @@
     "forge:local": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/forge-local.ts",
     "forge:runner": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/forge-runner.ts",
     "forge:sweep": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/forge-sweep.ts",
+    "discover:runner": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/discover-runner.ts",
+    "tail": "node scripts/patchlet-tail.mjs",
     "seed:site": "tsx --tsconfig apps/web/tsconfig.json scripts/seed-site.ts",
     "e2e:guide": "playwright test",
     "eval:docs": "tsx --tsconfig apps/web/tsconfig.json scripts/eval-docs.ts",

@@ -35,6 +35,7 @@ import {
 import { currentPageOf } from "./bind";
 import { loadVisitorFacts, rememberFromTurn } from "./memory";
 import { affordanceList, dropRepeats } from "./page";
+import { triggerDiscovery } from "../opportunity/queue";
 import { probeCapabilities, probeDocs, probeInterface, type DocsEvidence } from "./probes";
 import { noteRequest } from "./requests";
 import { bindFirstStep, candidatesFor, resolveTarget } from "./resolve";
@@ -624,21 +625,27 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
 
   // Even when the user never asks for it, a gap the agent found is worth the developers knowing.
   // It joins the other reports of the same gap and rises with them.
-  const noted = request
+  const note = request
     ? await noteRequest({
         projectId,
         request,
         conversationId,
         messageId: persisted.messageId || null,
       })
-    : false;
+    : { noted: false, groupId: null };
+
+  // A confirmed absence asks the second question: is this one person, or a pattern? The answer
+  // comes from PostHog through the opportunity pipeline, enqueued here and run off this turn.
+  if (outcome === "absent" && note.groupId) {
+    void triggerDiscovery({ projectId, groupId: note.groupId, conversationId, trigger: "auto" });
+  }
 
   yield {
     type: "answer",
     text,
     steps,
     escalation: escalationOffer(request, input.repoFullName),
-    noted,
+    noted: note.noted,
     ...(plan ? { plan } : {}),
     ...(sources.length ? { sources } : {}),
   };
