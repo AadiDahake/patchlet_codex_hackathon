@@ -170,3 +170,28 @@ def test_the_file_cap_never_drops_a_deletion() -> None:
 def test_the_file_cap_leaves_a_plan_that_fits_alone() -> None:
     planned = [codegen.PlannedFile(path=f"lib/f{i}.ts", reason="r", action="edit") for i in range(3)]
     assert codegen._cap(planned, codegen.MAX_FILES) == planned
+
+
+def test_plan_changes_drops_a_path_that_escapes_the_clone(monkeypatch, tmp_path: Path) -> None:
+    """A path is model output, and the commit builder writes it into the tree unchecked."""
+    root = _repo(tmp_path)
+    monkeypatch.setattr(
+        codegen.llm, "complete_json",
+        lambda *_args, **_kwargs: _stub_plan([
+            {"path": "../../etc/passwd", "reason": "no", "action": "edit"},
+            {"path": ".git/config", "reason": "no", "action": "edit"},
+            {"path": "lib/seats/together.ts", "reason": "yes", "action": "create"},
+        ]),
+    )
+    monkeypatch.setattr(codegen.repo, "head_sha", lambda _root: "deadbee")
+    plan, _ = codegen.plan_changes(root, _request(), "Seats together", "body")
+    assert [f.path for f in plan.files] == ["lib/seats/together.ts"]
+
+
+def test_relative_strips_only_a_leading_dot_slash() -> None:
+    """`lstrip("./")` rewrote a traversal into a plausible path instead of leaving it rejectable."""
+    assert codegen._relative("./lib/seats/index.ts") == "lib/seats/index.ts"
+    assert codegen._relative("  ././app/page.tsx ") == "app/page.tsx"
+    assert codegen._relative("../../etc/passwd") == "../../etc/passwd"
+    assert codegen._relative(".git/config") == ".git/config"
+    assert codegen._relative("lib/seats/index.ts") == "lib/seats/index.ts"
