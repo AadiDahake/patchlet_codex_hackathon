@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/console/map", label: "Product map" },
   { href: "/console/conversations", label: "Conversations" },
   { href: "/console/repository", label: "Repository" },
+  { href: "/console/opportunities", label: "Opportunities" },
   { href: "/console/activity", label: "Activity" },
 ] as const;
 
@@ -50,7 +51,10 @@ export function ConsoleNav({ email, company, githubLogin }: Props) {
     };
   }, [menuOpen]);
 
-  const current = LINKS.find((link) => link.href === pathname);
+  // Opportunities has child pages, so its tab stays lit on them; Overview must not.
+  const isActive = (href: string): boolean =>
+    pathname === href || (href !== "/console" && pathname.startsWith(`${href}/`));
+  const current = LINKS.find((link) => isActive(link.href));
 
   return (
     <header className="app-bar">
@@ -76,7 +80,7 @@ export function ConsoleNav({ email, company, githubLogin }: Props) {
           onClick={() => setMenuOpen(false)}
         >
           {LINKS.map((link) => {
-            const active = pathname === link.href;
+            const active = isActive(link.href);
             return (
               <Link
                 key={link.href}
