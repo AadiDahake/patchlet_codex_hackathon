@@ -818,6 +818,44 @@ request rather than a run of their own. Under `local` the insert is the whole ha
 runner polls for rows with `status = 'queued'` and `engine = 'local'` and reads the group off
 `escalation.group_id`.
 
+### The local engine's draft
+
+`services/worker` turns one approved issue into one draft pull request. What the model is given and
+what it may answer:
+
+- **The architect reads the repository, not a summary of it.** The bounded file tree (400 paths),
+  `AGENTS.md`, the dependency list from `package.json`, and the twelve most relevant files in full
+  (9,000 characters each, 110,000 in total). Ranking is by what the path says, as in the web app's
+  repository probe; keyword hits in the body only break ties, so a long document that mentions every
+  word of the request cannot outrank the module the request is about. A path named in backticks by
+  `AGENTS.md` is lifted, because a repository that documents itself says which files carry its
+  contract.
+- **The plan schema is strict and requires at least one file.** Each entry is
+  `{path, reason, action}` with `action` one of `edit`, `create`, `delete`. The action is reconciled
+  against the clone: a `create` of a file that is there is an edit, and a `delete` of a file that is
+  not there is dropped.
+- **An empty file list is a refusal, not a failure.** The issue is an approved product decision and
+  supersedes any premise, guard test or contract in the target repository whose only content is that
+  the feature is absent; such a guard belongs in the plan as a `delete` or an `edit`. One retry says
+  so explicitly. A second empty answer raises with the model's own summary in the message, so the
+  trace records why. See "An approved request outranks the target repository's premise" in
+  `docs/architecture.md`.
+- **The gates are the target repository's own.** `npm ci` (cached by lockfile hash), then
+  `npm run typecheck`, then `npm run build`, in the clone with the drafted files applied and the
+  planned deletions removed. A failure goes back to the editor for the files the output names, up to
+  3 repairs, then a fresh candidate, up to 2 candidates.
+- **The pull request body** names the request, the user's quote, the count line
+  (`Requested N times, M by users`), every changed file and every deleted one.
+- **The trace ends on the pull request and the pause.** `open_draft_pr` writes the gate comment and
+  the status row first, then the `artifact` row for the pull request and the `pause` approve card, so
+  those two are the last rows the console shows before a human decides.
+- **The deployment watch finds the merge commit.** NovaAir's Vercel project is git-linked, so a merge
+  to `main` deploys by itself. `steps/deploy.py` polls `GET /v6/deployments` filtered by `sha`, plus
+  the recent list because a queued deployment can be missing from the filtered answer for a few
+  seconds, and matches `meta.githubCommitSha`. After 10 minutes it raises `DeploymentTimeout`, which
+  the pipeline records as a `status` event and an `error` on the row with the escalation left
+  `deploying`. The pull request is merged either way, so the run is not marked failed.
+
 ## 5. Models
 
 Exported as `MODELS` from `@patchlet/shared`, with the reasoning efforts in `EFFORT` beside them.
@@ -866,44 +904,6 @@ Notes the API enforces:
 - Text to speech answers with chunked audio, so `POST /api/speak` yields each `audio/mpeg` chunk as
   it lands and playback starts before the utterance is complete.
 
-
-### The local engine's draft
-
-`services/worker` turns one approved issue into one draft pull request. What the model is given and
-what it may answer:
-
-- **The architect reads the repository, not a summary of it.** The bounded file tree (400 paths),
-  `AGENTS.md`, the dependency list from `package.json`, and the twelve most relevant files in full
-  (9,000 characters each, 110,000 in total). Ranking is by what the path says, as in the web app's
-  repository probe; keyword hits in the body only break ties, so a long document that mentions every
-  word of the request cannot outrank the module the request is about. A path named in backticks by
-  `AGENTS.md` is lifted, because a repository that documents itself says which files carry its
-  contract.
-- **The plan schema is strict and requires at least one file.** Each entry is
-  `{path, reason, action}` with `action` one of `edit`, `create`, `delete`. The action is reconciled
-  against the clone: a `create` of a file that is there is an edit, and a `delete` of a file that is
-  not there is dropped.
-- **An empty file list is a refusal, not a failure.** The issue is an approved product decision and
-  supersedes any premise, guard test or contract in the target repository whose only content is that
-  the feature is absent; such a guard belongs in the plan as a `delete` or an `edit`. One retry says
-  so explicitly. A second empty answer raises with the model's own summary in the message, so the
-  trace records why. See "An approved request outranks the target repository's premise" in
-  `docs/architecture.md`.
-- **The gates are the target repository's own.** `npm ci` (cached by lockfile hash), then
-  `npm run typecheck`, then `npm run build`, in the clone with the drafted files applied and the
-  planned deletions removed. A failure goes back to the editor for the files the output names, up to
-  3 repairs, then a fresh candidate, up to 2 candidates.
-- **The pull request body** names the request, the user's quote, the count line
-  (`Requested N times, M by users`), every changed file and every deleted one.
-- **The trace ends on the pull request and the pause.** `open_draft_pr` writes the gate comment and
-  the status row first, then the `artifact` row for the pull request and the `pause` approve card, so
-  those two are the last rows the console shows before a human decides.
-- **The deployment watch finds the merge commit.** NovaAir's Vercel project is git-linked, so a merge
-  to `main` deploys by itself. `steps/deploy.py` polls `GET /v6/deployments` filtered by `sha`, plus
-  the recent list because a queued deployment can be missing from the filtered answer for a few
-  seconds, and matches `meta.githubCommitSha`. After 10 minutes it raises `DeploymentTimeout`, which
-  the pipeline records as a `status` event and an `error` on the row with the escalation left
-  `deploying`. The pull request is merged either way, so the run is not marked failed.
 
 ## 6. Capability IR
 
