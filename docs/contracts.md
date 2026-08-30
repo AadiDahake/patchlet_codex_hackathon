@@ -249,6 +249,20 @@ create table transition (
   last_seen timestamptz not null default now()
 );
 
+-- One exploration of a site (migration 0016). The console queues it; a process with a browser
+-- claims it through claim_site_explore_job(), which takes the oldest queued row for one runner.
+create table site_explore_job (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references project on delete cascade,
+  site_url text not null,
+  status text not null default 'queued',   -- queued | running | done | failed
+  summary jsonb,                           -- ExploreSummary when done
+  error text,
+  created_at timestamptz not null default now(),
+  started_at timestamptz,
+  finished_at timestamptz
+);
+
 -- A question that resolved to a control, so the same question answers with no model call.
 create table known_route (
   id uuid primary key default gen_random_uuid(),
@@ -484,7 +498,8 @@ one account can never read another's sources, conversations, escalations or trac
 |---|---|---|
 | `POST /api/chat` | `{key, conversationId?, visitorId?, question, page: PageContext, continueFrom?}` | SSE of `ChatEvent`; each `data:` line is one JSON event, `event:` is its type. With `continueFrom`, one `answer` event with the remaining steps from the current page and `routeChanged` |
 | `POST /api/site/observe` | `{key, page: PageContext, transition?: {fromUrl, fromTitle, control: {role, name, landmark?, href?}}}` | `{ok: true}`; records the page in the site graph and the move the user made to reach it |
-| `POST /api/site/explore` | - (console) | `{summary: {pages, controls, transitions, reveals, formsTried, visited, skipped, durationMs}}`; explores `project.site_url` with a headless browser, 400 without a site address |
+| `POST /api/site/explore` | - (console) | 202 `{job: ExploreJob}`; queues an exploration of `project.site_url` (or returns the one already queued or running), 400 without a site address. A browser cannot run in the function, so a process on a machine that has one carries the job: the forge runner or `npm run explore -- --drain` |
+| `GET /api/site/explore` | - (console) | `{job: ExploreJob \| null}`: the newest job, `{id, siteUrl, status: queued \| running \| done \| failed, summary, error, createdAt, startedAt, finishedAt}`; the console polls it |
 | `GET /api/site/map` | - (console) | `{graph, routes, siteUrl}`: the site graph with last-seen times and the known routes |
 | `POST /api/documents/import-help` | - (console) | `{documents: Document[], pages}`; imports the help pages the graph knows (or a sitemap) as one document per article |
 | `POST /api/escalate` | `{key, conversationId, messageId, visitorId?}` | `{escalationId, groupId, status}`, or 409 `{error, reason: "no_repository"}` when the project has no repository bound |

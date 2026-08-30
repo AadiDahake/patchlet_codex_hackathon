@@ -73,6 +73,19 @@ It needs `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GITHUB_
 
 Details of the steps are in `services/worker/README.md`.
 
+## Exploring a site
+
+"Explore site" on the console's Product map page queues a job; a serverless function has no
+browser. A machine with one carries it: the forge runner (`pch-exec npm run forge:runner`) picks
+up queued explorations beside its own work, or run the queue by hand:
+
+```bash
+pch-exec npm run explore -- --drain                                              # every queued job
+pch-exec npm run explore -- --project novaair --url https://novaair.vercel.app   # one site, now
+```
+
+The console polls the job and shows pages as they are read.
+
 ## Checks after a deploy
 
 ```bash

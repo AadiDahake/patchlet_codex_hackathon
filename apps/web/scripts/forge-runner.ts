@@ -20,6 +20,7 @@ import {
   runClaimedRun,
   type ForgeQueueRow,
 } from "../lib/forge/queue";
+import { claimQueuedExploration, runClaimedExploration } from "../lib/graph/jobs";
 
 const POLL_MS = 2_000;
 
@@ -50,6 +51,18 @@ async function tick(): Promise<boolean> {
     carry(decided, runClaimedApproval(decided, loggerFor(decided)));
   }
 
+  // Exploring a site needs a browser too, so this process carries those jobs as well.
+  const exploration = await claimQueuedExploration();
+  if (exploration) {
+    found = true;
+    const tag = `[explore ${exploration.id.slice(0, 8)}]`;
+    say(`${tag} exploring ${exploration.siteUrl}`);
+    inFlight.add(exploration.id);
+    void runClaimedExploration(exploration, (line) => say(`${tag} ${line}`))
+      .then((result) => say(`${tag} ${result.status}${result.error ? `: ${result.error}` : ""}`))
+      .finally(() => inFlight.delete(exploration.id));
+  }
+
   const queued = await claimQueuedRun();
   if (queued) {
     found = true;
@@ -66,7 +79,7 @@ async function tick(): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  say("forge runner polling for queued runs and decisions");
+  say("forge runner polling for queued runs, decisions and explorations");
   let stopping = false;
   process.on("SIGINT", () => {
     stopping = true;
