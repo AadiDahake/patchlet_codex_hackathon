@@ -17,6 +17,8 @@ before changing anything that crosses a boundary.
 | `docs` | The plan, architecture, contracts, the forge engine, demo notes, deploy notes. |
 
 `docs/PLAN.md` is what the product is for. Read it before changing anything a demo beat depends on.
+`docs/guidance.md` is how a question becomes a walk on the page: the site graph, the planner, the
+knowledge base, and the measurements that hold them to account.
 
 ## The contracts file
 
@@ -105,19 +107,30 @@ never cast it. Concretely:
 
 ## Guiding a user on their own page
 
-The widget watches the host page; it never drives it. Two rules keep that honest, and both have
-regression tests in `packages/widget/test/machine.test.ts`:
+The widget watches the host page; it never drives it. The plan it walks is a route over the site
+graph (`docs/guidance.md`): the server resolves the question to one control, computes the path
+from the current page, and the count it announces is the length of that path. Four rules keep the
+walk honest, and each has a regression test in `packages/widget/test`:
 
-- A control that disappears within 1.5 s of the user pressing it counts as that step succeeding.
-  Menus and dialogs dismiss on `pointerdown` and unmount their trigger, so the `click` that would
+- A step is bound by identity, never by position. The scan numbers affordances positionally, so a
+  re-render can point the same id at a different control; the machine binds every step by role,
+  accessible name, landmark and link target (`controlKey` in `@patchlet/shared`), with the old id
+  only as a tie-break.
+- The announced total never changes during a successful walk. After the last step the machine is
+  done; it does not ask the server whether anything is left. Only when a control is absent after
+  a re-scan and one more look after the page settles does it ask `POST /api/chat` with
+  `continueFrom`, and then it says plainly that the route changed and shows the new count.
+- A press is success. `pointerdown` on the spotlit control advances a click or navigation step;
+  menus and dialogs dismiss on `pointerdown` and unmount their trigger, so the `click` that would
   have confirmed the action never has a node to fire on.
 - Nothing is ever bound or drawn against an empty or off-screen rect (`guide/geometry.ts`). A
   detached node still answers `getBoundingClientRect` with zeros, and a caption anchored to one
-  lands in the top-left corner pointing at nothing. Treat it as lost and re-plan instead.
+  lands in the top-left corner pointing at nothing. Treat it as lost and re-bind instead.
 
-Re-planning mid-walkthrough goes to `POST /api/chat` with `continueFrom`, which takes the fast path
-in `apps/web/lib/agent/continue.ts`: one small model call over the stored answer and its grounding,
-no understanding, probes or verdict.
+The widget also teaches the graph: `guide/transitions.ts` remembers the control a visitor pressed
+and reports the page they landed on to `POST /api/site/observe`, once per route and move per
+session. The continuation in `apps/web/lib/agent/continue.ts` recomputes the route over the graph
+with no model; a model reads the page only when the graph has no route from it.
 
 ## When the widget speaks
 
@@ -169,6 +182,8 @@ npm test             # must pass before you push
 npm run db:migrate   # apply supabase/migrations/*.sql in order
 npm run db:seed      # idempotent seed, prints the embed key when it creates one
 node scripts/screenshots.mjs pages <dir> name=url...   # 1440x900 captures, private headless Chromium
+npm run seed:site    # explore the project's site into the product map
+npm run e2e:guide    # the guided walk on NovaAir, against the widget's mock API or a running stack
 ```
 
 Screenshots come from `scripts/screenshots.mjs` (Playwright, one private browser per run), never
