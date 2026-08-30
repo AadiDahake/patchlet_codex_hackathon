@@ -81,6 +81,9 @@ the gap. Three rules, all in `docs/opportunities.md`:
   is named, filters the window first and scans `events` once; `OFFSET` is never used.
 - The pipeline's trace rows carry `source: "forge"` and the group id, and the two lines the chat
   shows carry `source: "agent"` on the conversation. `npm run tail` renders the same stream.
+- A console page never evaluates `@patchlet/capability` (its modules read prompt files through
+  `import.meta.url`, which the page layer lacks at build time). Pages and components import it as
+  types only; anything a page needs rendered, the pipeline renders and stores on the row.
 
 ## The forge engine
 
