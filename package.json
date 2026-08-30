@@ -21,6 +21,7 @@
     "db:seed": "node scripts/seed.mjs",
     "demo:reset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/reset-demo.mjs",
     "forge:local": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/forge-local.ts",
+    "forge:runner": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/forge-runner.ts",
     "forge:sweep": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/forge-sweep.ts"
   },
   "devDependencies": {

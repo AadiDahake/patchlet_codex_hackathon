@@ -1,19 +1,18 @@
 /**
- * Starting a forge run from the console: the escalation row, the target repository, the
- * specification, and the engine wired from the environment.
+ * Starting a forge run from the console: the escalation row, the target repository and the
+ * specification it will build.
  *
- * The run itself is long (each candidate is three Codex sessions and a test run). The route that
- * calls this answers as soon as the row exists and lets the run continue after the response.
+ * The run itself is long (each candidate is three Codex sessions and a test run), so nothing here
+ * runs it. The row is the queue: `lib/forge/queue.ts` describes it and `npm run forge:runner`
+ * carries it. The route that calls this answers as soon as the row exists.
  */
 import type { FeatureRequest, RequestGroup } from "@patchlet/shared";
 import { attachRun } from "../agent/runner";
-import { appUrl, forgeStrategy, forgeTargetRepo } from "../env";
+import { forgeTargetRepo } from "../env";
 import { activeGithubToken } from "../github/connection";
 import { serviceClient } from "../supabase";
-import { buildForgeDeps, forgeAvailability } from "./config";
-import { runForge, type ForgeRunResult } from "./engine";
+import { forgeAvailability } from "./config";
 import type { CapabilityIr } from "./ir";
-import { SupabaseForgeStore } from "./store";
 import type { TargetRepo } from "./strategy";
 
 export type ForgeProject = {
@@ -22,10 +21,8 @@ export type ForgeProject = {
   repoDefaultBranch: string | null;
 };
 
-export type StartedRun = {
+export type QueuedRun = {
   escalationId: string;
-  /** Resolves when the run pauses for approval, or fails. Never rejects. */
-  run: () => Promise<ForgeRunResult>;
 };
 
 export class ForgeStartError extends Error {
@@ -71,9 +68,15 @@ export async function latestCapabilitySpec(
 
 /**
  * Reuses the group's queued forge escalation when the widget already opened one, else inserts a
- * new run. Either way the group points at it from here.
+ * new run. Either way the group points at it from here, and the row carries the specification:
+ * that is what makes it runnable for the runner, which skips a queued forge row without one.
  */
-async function escalationFor(project: ForgeProject, group: RequestGroup, specId: string | null): Promise<string> {
+async function escalationFor(
+  project: ForgeProject,
+  group: RequestGroup,
+  specId: string | null,
+  ir: CapabilityIr,
+): Promise<string> {
   const db = serviceClient();
   const { data: queued } = await db
     .from("escalation")
@@ -104,62 +107,38 @@ async function escalationFor(project: ForgeProject, group: RequestGroup, specId:
         engine: "forge",
         status: "queued",
         capability_spec_id: specId,
+        capability_ir: ir,
       })
       .select("id")
       .single();
     if (error || !data) throw new Error(error?.message ?? "the run could not be recorded");
     escalationId = String(data.id);
-  } else if (specId) {
-    await db.from("escalation").update({ capability_spec_id: specId }).eq("id", escalationId);
+  } else {
+    await db
+      .from("escalation")
+      .update({ capability_ir: ir, ...(specId ? { capability_spec_id: specId } : {}) })
+      .eq("id", escalationId);
   }
   await attachRun(group.id, escalationId, "drafting");
   return escalationId;
 }
 
-export async function startForgeRun(input: {
+/**
+ * Records a forge run and leaves it queued for the runner.
+ *
+ * Everything that can refuse the run happens here, before a row exists: the strategy's keys and
+ * the target repository's token. What is left is minutes of sandbox work, which no serverless
+ * function can hold, so the runner takes it from the row.
+ */
+export async function enqueueForgeRun(input: {
   project: ForgeProject;
   group: RequestGroup;
   ir: CapabilityIr;
   capabilitySpecId: string | null;
-}): Promise<StartedRun> {
+}): Promise<QueuedRun> {
   const availability = forgeAvailability();
   if (!availability.ok) throw new ForgeStartError(availability.reason, "engine_unavailable", 503);
-  const repo = await targetRepoFor(input.project);
-  const escalationId = await escalationFor(input.project, input.group, input.capabilitySpecId);
-  const store = new SupabaseForgeStore({
-    projectId: input.project.id,
-    escalationId,
-    groupId: input.group.id,
-  });
-  const log = (line: string): void => console.log(`[forge ${escalationId.slice(0, 8)}] ${line}`);
-  const deps = buildForgeDeps(store, { name: forgeStrategy(), log });
-
-  return {
-    escalationId,
-    run: () =>
-      runForge(
-        {
-          escalationId,
-          ir: input.ir,
-          capabilitySpecId: input.capabilitySpecId,
-          repo,
-          opportunityUrl: `${appUrl()}/console/activity?escalation=${escalationId}`,
-          push: true,
-        },
-        deps,
-      ).catch(async (error: Error) => {
-        // runForge reports its own failures; this catches what happens before it can.
-        await store.trace({ kind: "error", status: "failed", title: "Forge failed", detail: { message: error.message } });
-        await store.updateEscalation({ status: "failed", error: error.message.slice(0, 2000) });
-        return {
-          status: "failed" as const,
-          winner: null,
-          candidates: [],
-          previewUrl: null,
-          pr: null,
-          wouldPush: null,
-          error: error.message,
-        };
-      }),
-  };
+  await targetRepoFor(input.project);
+  const escalationId = await escalationFor(input.project, input.group, input.capabilitySpecId, input.ir);
+  return { escalationId };
 }
