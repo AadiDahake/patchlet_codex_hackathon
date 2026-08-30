@@ -243,7 +243,31 @@ def _planned_files(raw: dict[str, object], root: Path, tree: list[str]) -> list[
         elif action == "delete" and not on_disk:
             continue
         files.append(PlannedFile(path=path, reason=str(item.get("reason", "")).strip(), action=action))
-    return files[:MAX_FILES]
+    return _cap(files, MAX_FILES)
+
+
+def _cap(files: list[PlannedFile], limit: int) -> list[PlannedFile]:
+    """Truncate to the limit, but never drop a deletion.
+
+    The cap makes the architect prioritise, and a guard test that contradicts the feature loses that
+    contest to a documentation edit more often than it should. A deletion is never garnish: it is
+    always there because the file asserts something the change makes false, so shipping without it
+    ships the feature next to the test that forbids it.
+    """
+    if len(files) <= limit:
+        return files
+    kept = files[:limit]
+    dropped = [planned for planned in files[limit:] if planned.is_delete]
+    if not dropped:
+        return kept
+    # Give up the lowest-priority entries the model listed, from the tail, keeping its own order.
+    room = [index for index in reversed(range(len(kept))) if not kept[index].is_delete]
+    for planned in dropped:
+        if not room:
+            break
+        kept[room.pop(0)] = planned
+    order = {planned.path: index for index, planned in enumerate(files)}
+    return sorted(kept, key=lambda planned: order[planned.path])
 
 
 def plan_changes(root: Path, req: FeatureRequestInput, issue_title: str, issue_body: str) -> tuple[Plan, str]:

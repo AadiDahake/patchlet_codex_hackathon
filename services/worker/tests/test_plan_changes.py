@@ -150,3 +150,23 @@ def test_the_prompt_omits_the_block_when_the_conventions_name_nothing(tmp_path: 
     root = _repo(tmp_path)
     prompt = codegen.build_architect_prompt(_request(), "t", "b", "no paths here", [], [], "", set())
     assert "# Files the conventions name" not in prompt
+
+
+def test_the_file_cap_never_drops_a_deletion() -> None:
+    """The cap makes the architect prioritise; a guard must not lose that contest."""
+    planned = [
+        codegen.PlannedFile(path=f"lib/f{i}.ts", reason="r", action="edit")
+        for i in range(codegen.MAX_FILES)
+    ] + [codegen.PlannedFile(path="tests/guard.test.ts", reason="asserts the absence", action="delete")]
+
+    capped = codegen._cap(planned, codegen.MAX_FILES)
+
+    assert len(capped) == codegen.MAX_FILES
+    assert [f.path for f in capped if f.is_delete] == ["tests/guard.test.ts"]
+    # The tail is what gives way, and the model's own order survives.
+    assert [f.path for f in capped][:-1] == [f"lib/f{i}.ts" for i in range(codegen.MAX_FILES - 1)]
+
+
+def test_the_file_cap_leaves_a_plan_that_fits_alone() -> None:
+    planned = [codegen.PlannedFile(path=f"lib/f{i}.ts", reason="r", action="edit") for i in range(3)]
+    assert codegen._cap(planned, codegen.MAX_FILES) == planned
