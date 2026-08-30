@@ -89,8 +89,10 @@ export function ActivityConsole({
     if (!selection) return null;
     const params = new URLSearchParams();
     if (selection.kind === "request") {
-      if (!selectedRequest?.escalationId) return null;
-      params.set("escalationId", selectedRequest.escalationId);
+      // A request's story starts before any run: the chat that noticed it and the pipeline that
+      // mined and compiled it carry the group id; the run that builds it carries the escalation.
+      params.set("groupId", selection.id);
+      if (selectedRequest?.escalationId) params.set("escalationId", selectedRequest.escalationId);
     } else {
       params.set("conversationId", selection.id);
     }
