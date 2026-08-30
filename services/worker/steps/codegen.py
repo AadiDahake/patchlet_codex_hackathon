@@ -158,13 +158,14 @@ def relevant_files(
     agents_md: str,
     limit: int = RELEVANT_FILES,
     budget: int = CONTEXT_CHARS,
+    referenced: set[str] | None = None,
 ) -> list[tuple[str, str]]:
     """The files the architect reads in full: the best keyword matches, plus what AGENTS.md names.
 
     Whole contents rather than the first forty lines. A plan that composes a repository's own
     primitives has to be made against the signatures those primitives actually have.
     """
-    referenced = repo.referenced_paths(tree, agents_md)
+    referenced = repo.referenced_paths(tree, agents_md) if referenced is None else referenced
     ranked = repo.rank_files(root, tree, terms, limit=limit, referenced=referenced)
     chosen: list[tuple[str, str]] = []
     spent = 0
@@ -187,11 +188,23 @@ def build_architect_prompt(
     tree: list[str],
     contents: list[tuple[str, str]],
     dependencies: str = "",
+    referenced: set[str] | None = None,
 ) -> str:
     parts = [_issue_block(req, issue_title, issue_body)]
     parts.append("# Repository conventions (AGENTS.md)\n\n" + (agents_md.strip() or "(no AGENTS.md in this repository)"))
     if dependencies:
         parts.append("# " + dependencies)
+    if referenced:
+        # AGENTS.md names these, so they carry the contract. Asking about them by name is what stops
+        # a plan from shipping a feature and leaving the test that forbids it in place.
+        parts.append(
+            "# Files the conventions name\n\n"
+            + "\n".join(f"- {path}" for path in sorted(referenced))
+            + "\n\nEach of these carries part of this repository's contract. Check every one against the "
+            "feature: any that asserts, lists or documents the product WITHOUT it belongs in your plan, "
+            "as an edit that describes the product with it, or as a delete when asserting the absence is "
+            "the file's only purpose."
+        )
     shown = tree[:TREE_LIMIT]
     tree_block = "\n".join(shown)
     if len(tree) > len(shown):
@@ -243,8 +256,11 @@ def plan_changes(root: Path, req: FeatureRequestInput, issue_title: str, issue_b
     tree = repo.list_source_files(root)
     terms = repo.keywords(req.title, req.description, req.area)
     agents_md = repo.read_file(root, "AGENTS.md") or ""
-    contents = relevant_files(root, tree, terms, agents_md)
-    prompt = build_architect_prompt(req, issue_title, issue_body, agents_md, tree, contents, dependency_block(root))
+    referenced = repo.referenced_paths(tree, agents_md)
+    contents = relevant_files(root, tree, terms, agents_md, referenced=referenced)
+    prompt = build_architect_prompt(
+        req, issue_title, issue_body, agents_md, tree, contents, dependency_block(root), referenced
+    )
 
     raw = llm.complete_json(llm.ARCHITECT_MODEL, ARCHITECT_SYSTEM, prompt, "change_plan", PLAN_SCHEMA)
     files = _planned_files(raw, root, tree)

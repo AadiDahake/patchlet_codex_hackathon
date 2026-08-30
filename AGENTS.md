@@ -58,6 +58,21 @@ strategy's keys, and `POST /api/escalate` answers `503` and writes nothing when 
 rather than queueing a row no runner will claim. Any engine added later follows the same rule -
 refuse before the first write, never after it.
 
+## An approved issue outranks the target repository's premise
+
+The worker's architect reads the target repository's own `AGENTS.md` before it plans anything, and a
+product repository can hold a convention, a contract or a test whose whole content is that the
+requested feature is absent. NovaAir is one: it has the seat primitives and a guard test that fails
+if anything composes them. Read as instructions those forbid the change, and the architect answered
+with an empty file list and quoted the convention back.
+
+A human accepted the request in the console before the run started, so that premise is what the
+change supersedes. `services/worker/steps/codegen.py` says so in the prompt, a planned file carries
+an action (`edit`, `create`, `delete`) so a guard can be removed, the strict schema requires at least
+one file, and an empty answer is retried once and then raises with the model's own words. Everything
+else in the target's conventions still binds: only the absence claim is superseded, never the
+engineering standard around it. Do not soften this by editing the target repository instead.
+
 ## The capability compiler stays pure
 
 `packages/capability` has one rule: no network, no database, no framework imports. It never

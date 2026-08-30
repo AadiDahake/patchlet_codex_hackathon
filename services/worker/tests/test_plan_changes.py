@@ -129,3 +129,24 @@ def test_relevant_files_respects_the_character_budget(tmp_path: Path) -> None:
     tree = codegen.repo.list_source_files(root)
     terms = codegen.repo.keywords("seat")
     assert codegen.relevant_files(root, tree, terms, "", budget=10) == []
+
+
+def test_the_prompt_asks_about_every_file_the_conventions_name(tmp_path: Path) -> None:
+    """Naming the guard is what stops a plan shipping the feature and leaving the test that bans it."""
+    root = _repo(tmp_path)
+    agents_md = (root / "AGENTS.md").read_text()
+    tree = codegen.repo.list_source_files(root)
+    referenced = codegen.repo.referenced_paths(tree, agents_md)
+    prompt = codegen.build_architect_prompt(
+        _request(), "Seats together", "body", agents_md, tree, [], "", referenced,
+    )
+    assert "# Files the conventions name" in prompt
+    assert "- tests/no-group-seating.test.ts" in prompt
+    assert "- lib/seats/index.ts" in prompt
+    assert "a delete when asserting the absence is the file's only purpose" in prompt
+
+
+def test_the_prompt_omits_the_block_when_the_conventions_name_nothing(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    prompt = codegen.build_architect_prompt(_request(), "t", "b", "no paths here", [], [], "", set())
+    assert "# Files the conventions name" not in prompt
