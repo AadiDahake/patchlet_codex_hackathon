@@ -199,14 +199,17 @@ export async function runDiscovery(job: DiscoveryJob, deps: DiscoveryDeps): Prom
   }
 }
 
-/** The real dependencies for one run, wired from the environment. */
+/**
+ * The real dependencies for one run, wired from the environment. `model` overrides the OpenAI
+ * client; the runner passes the machine's own Codex login for a keyless development run.
+ */
 export function buildDiscoveryDeps(
   discovery: Discovery & { projectId: string },
-  options: { log?: (line: string) => void } = {},
+  options: { log?: (line: string) => void; model?: ModelClient } = {},
 ): DiscoveryDeps {
   return {
     posthog: posthogClient(),
-    model: openaiModelClient(),
+    model: options.model ?? openaiModelClient(),
     store: new SupabaseOpportunityStore({
       projectId: discovery.projectId,
       groupId: discovery.groupId,
@@ -225,13 +228,13 @@ export function buildDiscoveryDeps(
  */
 export async function executeDiscovery(
   id: string,
-  options: { log?: (line: string) => void; alreadyClaimed?: boolean } = {},
+  options: { log?: (line: string) => void; alreadyClaimed?: boolean; model?: ModelClient } = {},
 ): Promise<DiscoveryResult | null> {
   const log = options.log ?? ((line: string) => console.log(`[discovery ${id.slice(0, 8)}] ${line}`));
   const discovery = options.alreadyClaimed ? await loadDiscovery(id) : await claimDiscovery(id);
   if (!discovery) return null;
   log(`running for group ${discovery.groupId} (${discovery.trigger})`);
-  const result = await runDiscovery(discovery, buildDiscoveryDeps(discovery, { log }));
+  const result = await runDiscovery(discovery, buildDiscoveryDeps(discovery, { log, model: options.model }));
   log(`${result.status}${result.decision ? `, ${result.decision}` : ""}${result.error ? `: ${result.error}` : ""}`);
   return result;
 }
