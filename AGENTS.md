@@ -182,7 +182,8 @@ npm test             # must pass before you push
 npm run db:migrate   # apply supabase/migrations/*.sql in order
 npm run db:seed      # idempotent seed, prints the embed key when it creates one
 node scripts/screenshots.mjs pages <dir> name=url...   # 1440x900 captures, private headless Chromium
-npm run seed:site    # explore the project's site into the product map
+npm run seed:site    # explore the project's site into the product map and import its help center
+npm run eval:docs    # the offline set that tunes the documentation check, against a running site
 npm run e2e:guide    # the guided walk on NovaAir, against the widget's mock API or a running stack
 ```
 
