@@ -77,6 +77,13 @@ Markdown files in `lib/forge/prompts/`; a change to one is a change to what Code
 reviewed like code. `npm run forge:local -- --spec <ir.json> --no-push` runs the whole engine on
 this machine with no database; `npm run forge:sweep` shuts down devboxes a crash left behind.
 
+No forge work happens inside an HTTP request. A run is tens of minutes and Vercel's hobby plan caps
+a serverless function at 300 s, so the routes write the `escalation` row and answer `202`, and
+`npm run forge:runner` polls those rows and carries the work, as
+`services/worker/local_runner.py` does for the `local` engine. Keep `export const maxDuration` at
+or under 300 in every route: a higher value fails the production deploy, and it is a sign the work
+belongs in a runner. See "Where a run actually runs" in `docs/forge.md`.
+
 ## TypeScript
 
 - `strict: true` everywhere, inherited from `tsconfig.base.json`. No `any` in checked-in code.
