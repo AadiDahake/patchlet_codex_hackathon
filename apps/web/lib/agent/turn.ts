@@ -35,7 +35,7 @@ import {
 import { currentPageOf } from "./bind";
 import { loadVisitorFacts, rememberFromTurn } from "./memory";
 import { affordanceList, dropRepeats } from "./page";
-import { probeDocs, probeInterface, probeRepository, type DocsEvidence } from "./probes";
+import { probeCapabilities, probeDocs, probeInterface, type DocsEvidence } from "./probes";
 import { noteRequest } from "./requests";
 import { bindFirstStep, candidatesFor, resolveTarget } from "./resolve";
 import { closeConversation } from "./summary";
@@ -60,6 +60,8 @@ export type TurnInput = {
   conversationId?: string;
   /** Random id from the visitor's browser; the key of everything the agent remembers. */
   visitorId?: string;
+  /** The project's own thresholds, from `project.settings`. */
+  thresholds?: { docsThreshold?: number; interfaceThreshold?: number };
 };
 
 const UNDERSTANDING_SCHEMA = {
@@ -346,12 +348,19 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   for (const probe of ["docs", "interface", "repository"] as const) {
     yield { type: "probe", probe, status: "running" };
   }
-  const [docs, ui, repository] = await Promise.all([
-    probeDocs(`${question} ${understanding.feature}`, projectId, questionEmbedding),
+  const [docs, ui, capabilities] = await Promise.all([
+    probeDocs(`${question} ${understanding.feature}`, projectId, questionEmbedding, input.thresholds?.docsThreshold),
     Promise.resolve(probeInterface(question, page, understanding.feature)),
-    probeRepository(projectId, understanding.feature, input.repoFullName, input.defaultBranch),
+    probeCapabilities(
+      projectId,
+      understanding.feature,
+      graph,
+      input.repoFullName,
+      input.defaultBranch,
+      input.thresholds?.interfaceThreshold,
+    ),
   ]);
-  const probes: ProbeResult[] = [docs, ui, repository];
+  const probes: ProbeResult[] = [docs, ui, capabilities];
   for (const result of probes) {
     yield { type: "probe", probe: result.probe, status: "done", result };
     void emitTrace({
@@ -366,7 +375,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   }
 
   // 5. Route on the evidence. Absence is confirmed by a reasoning model.
-  let outcome = routeProbes(probes);
+  let outcome = routeProbes(probes, input.thresholds);
   let verdict: Verdict = {
     outcome,
     confidence: 0.8,
@@ -601,9 +610,13 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
         ? " I can report this to the developers so they can build it. Would you like me to?"
         : " I can report it to the developers so they can look. Would you like me to?"
       : "";
+    const searched = (capabilities.evidence as { graph?: { pages: number; controls: number } } | null)?.graph;
+    const where = searched && searched.controls > 0
+      ? `I checked the documentation, this page, and ${searched.pages} ${searched.pages === 1 ? "page" : "pages"} with ${searched.controls} controls of this product, and found nothing.`
+      : "I checked the documentation, this page, and what this product is known to do, and found nothing.";
     text =
       outcome === "absent"
-        ? `I am sorry, there is no way of ${understanding.feature} here today. I checked the documentation, this page, and what this product is known to do, and found nothing.${offer}`
+        ? `I am sorry, there is no way of ${understanding.feature} here today. ${where}${offer}`
         : `I could not confirm that ${understanding.feature} is possible here. I did not find it in the documentation or on this page.${offer}`;
   }
 

@@ -56,8 +56,15 @@ export const EMBED_DIMENSIONS = 1536;
 /** Default text to speech voice. */
 export const DEFAULT_VOICE = "marin";
 
-/** Routing thresholds, overridable per project through `project.settings`. */
+/**
+ * Routing thresholds, overridable per project through `project.settings`.
+ *
+ * `docsThreshold` is the score at which a documentation passage counts without being read. It is
+ * tuned on the offline set in `scripts/eval-docs.ts`, where the weakest sure answer scored 0.63
+ * and the strongest passage about a capability the product lacks scored 0.49; between 0.40 and
+ * this line the passage is read.
+ */
 export const DEFAULT_THRESHOLDS = {
-  docsThreshold: 0.7,
+  docsThreshold: 0.62,
   interfaceThreshold: 0.5,
 } as const;

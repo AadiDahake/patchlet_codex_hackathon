@@ -23,7 +23,7 @@ const PROJECT = {
   repoDefaultBranch: "main",
   // Keep in step with DEFAULT_THRESHOLDS and DEFAULT_VOICE in @patchlet/shared. The script
   // runs under plain node, so it repeats the values rather than importing TypeScript.
-  settings: { docsThreshold: 0.7, interfaceThreshold: 0.5, voice: "marin" },
+  settings: { docsThreshold: 0.62, interfaceThreshold: 0.5, voice: "marin" },
 };
 
 /** The auth user id behind an email address, or null when there is no such account. */

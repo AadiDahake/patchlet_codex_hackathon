@@ -15,7 +15,7 @@ import {
 import { serviceClient } from "@/lib/supabase";
 
 /** The thresholds the agent starts with. A project can tune them later through PATCH /api/project. */
-const DEFAULT_SETTINGS = { docsThreshold: 0.7, interfaceThreshold: 0.5, voice: "en_paul_neutral" };
+const DEFAULT_SETTINGS = { docsThreshold: 0.62, interfaceThreshold: 0.5, voice: "marin" };
 
 const SLUG_ATTEMPTS = 12;
 const UNIQUE_VIOLATION = "23505";
