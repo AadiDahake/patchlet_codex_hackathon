@@ -1,6 +1,7 @@
 import { computeAccessibleName } from 'dom-accessibility-api';
 import type { Affordance, PageContext } from '../types';
 import { rank, type RankInput } from './rank';
+import { visibleText } from './text';
 
 /** Everything the scanner treats as a control. Exported so the transition watcher agrees with it. */
 export const INTERACTIVE_SELECTOR = [
@@ -71,6 +72,7 @@ export function scanAffordances(options: ScanOptions = {}): ScanResult {
       url: doc.defaultView?.location?.href ?? '',
       title: doc.title ?? '',
       affordances,
+      text: visibleText(doc.body ?? doc.documentElement, options.exclude ?? null),
     },
     lookup,
   };

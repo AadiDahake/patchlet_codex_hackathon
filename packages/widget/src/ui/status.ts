@@ -58,7 +58,9 @@ function stageOf(event: ChatEvent): WorkStage | null {
     case 'conversation':
       return 'reading';
     case 'understanding':
-      return 'docs';
+      // A greeting and a question the page answers run no check, so the line must not claim one.
+      // Nothing follows this event for them but the answer itself.
+      return event.intent === 'chat' || event.intent === 'page' ? 'writing' : 'docs';
     case 'probe':
       if (event.status === 'running') return 'docs';
       if (event.probe === 'docs') return 'page';

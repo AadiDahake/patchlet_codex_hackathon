@@ -157,3 +157,21 @@ test("a question asked before answers from the product map without a model", asy
   test.info().annotations.push({ type: "time-to-first-spotlight-known-ms", description: String(elapsed) });
   if (process.env.NOVAAIR_BASE_URL) expect(elapsed).toBeLessThan(1500);
 });
+
+test("a greeting is answered without checks, and nothing is offered to report", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open support" }).click();
+  const composer = page.getByRole("textbox").last();
+  await composer.fill("Hello, can you hear me?");
+  await composer.press("Enter");
+
+  // Locators pierce the widget's shadow root, so the card is addressed from the page.
+  await expect(page.getByRole("button", { name: "Copy" })).toBeVisible({ timeout: 30_000 });
+  // No walk, and no button that turns a greeting into a feature request.
+  await expect(page.getByRole("button", { name: "Report to developers" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show me" })).toHaveCount(0);
+  const answer = await page.evaluate(
+    () => document.querySelector("patchlet-widget")?.shadowRoot?.querySelector(".pl-card p")?.textContent ?? "",
+  );
+  expect(answer).not.toMatch(/I am sorry|report this to the developers/i);
+});
