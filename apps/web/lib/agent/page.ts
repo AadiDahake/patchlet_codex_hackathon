@@ -35,3 +35,18 @@ export function visibleAffordances(page: PageContext): Affordance[] {
   const visible = page.affordances.filter((affordance) => affordance.visible);
   return visible.length > 0 ? visible : page.affordances;
 }
+
+/**
+ * A page's own words, bounded.
+ *
+ * The scanner collapses the visible text of the host page and sends it beside the affordances,
+ * which is what lets a question the page already answers be answered from the page. It arrives
+ * from a customer's site over a public route, so it is clamped again here before it reaches a
+ * prompt: an old widget sends nothing, and a hostile one must not send a book.
+ */
+export const MAX_PAGE_TEXT = 2000;
+
+export function pageText(page: PageContext): string {
+  if (typeof page.text !== "string") return "";
+  return page.text.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_TEXT);
+}

@@ -11,7 +11,24 @@ export type Affordance = {
   state?: string;        // "selected", "expanded", "checked" and so on, when the control has one
 };
 
-export type PageContext = { url: string; title: string; affordances: Affordance[] };
+export type PageContext = {
+  url: string;
+  title: string;
+  affordances: Affordance[];
+  /** The visible text of the page, collapsed and bounded by the scanner. Absent on an old widget. */
+  text?: string;
+};
+
+/**
+ * What kind of message the visitor sent, decided before any check runs.
+ *
+ * `chat` is a greeting, thanks, small talk, a question about the assistant, or general knowledge
+ * that is not about this product. `page` is a question the page in front of the visitor already
+ * answers. `product` is a question about what the product can do or where a control is. `mixed`
+ * is both at once, and is also what an unsure classification falls back to, because the product
+ * path is the one that checks its evidence.
+ */
+export type MessageIntent = "chat" | "page" | "product" | "mixed";
 
 /**
  * One instruction in a walk. `target` is the live affordance id on the page the widget scanned;
@@ -154,8 +171,9 @@ export type ChatEvent =
   | { type: "conversation"; conversationId: string; messageId: string }
   | {
       type: "understanding";
+      /** The capability the question is about. Empty when the message is not about one. */
       feature: string;
-      intent: "howto" | "feature" | "other";
+      intent: MessageIntent;
       /** What the agent already knows about this visitor, oldest first. Empty on a first visit. */
       memory: string[];
     }

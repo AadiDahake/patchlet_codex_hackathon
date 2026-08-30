@@ -1,10 +1,16 @@
 /**
- * One chat turn: understand, check three independent sources, route on the
- * evidence, then answer, hedge, or state plainly that the feature is missing.
+ * One chat turn: read the message, route on what kind of message it is, and only then check
+ * anything.
  *
- * A question that resolved before answers from the site graph with no model call at all. A new
- * question resolves to one control on the site; the route to it is read off the graph, so the
- * number of steps the widget announces is the number the walk takes.
+ * Not every message is a support request. A greeting, a question about the assistant and a piece
+ * of general knowledge are answered from the model; a question the page already answers is
+ * answered from that page. Neither runs a check and neither offers to report anything, because
+ * there is nothing missing to report. Only a question about what the product can do runs the
+ * three checks, the verdict and the absence path (`understand.ts`).
+ *
+ * A question that resolved before answers from the site graph with one model call. A new question
+ * resolves to one control on the site; the route to it is read off the graph, so the number of
+ * steps the widget announces is the number the walk takes.
  */
 import { EFFORT, MODELS, MAX_ROUTE_STEPS, planRoute, routeProbes, validatePlan } from "@patchlet/shared";
 import type {
@@ -33,13 +39,15 @@ import {
   type StoredGraph,
 } from "../graph/store";
 import { currentPageOf } from "./bind";
+import { answerChat, answerFromPage, answerFromPassage } from "./direct";
 import { loadVisitorFacts, rememberFromTurn } from "./memory";
 import { affordanceList, dropRepeats } from "./page";
 import { triggerDiscovery } from "../opportunity/queue";
-import { probeCapabilities, probeDocs, probeInterface, type DocsEvidence } from "./probes";
+import { DOCS_SURE_MISS, probeCapabilities, probeDocs, probeInterface, type DocsEvidence } from "./probes";
 import { noteRequest } from "./requests";
 import { bindFirstStep, candidatesFor, resolveTarget } from "./resolve";
 import { closeConversation } from "./summary";
+import { understand } from "./understand";
 
 /**
  * What the widget is told about reporting.
@@ -63,16 +71,6 @@ export type TurnInput = {
   visitorId?: string;
   /** The project's own thresholds, from `project.settings`. */
   thresholds?: { docsThreshold?: number; interfaceThreshold?: number };
-};
-
-const UNDERSTANDING_SCHEMA = {
-  type: "object",
-  properties: {
-    intent: { type: "string", enum: ["howto", "feature", "other"] },
-    feature: { type: "string" },
-  },
-  required: ["intent", "feature"],
-  additionalProperties: false,
 };
 
 const PLAN_SCHEMA = {
@@ -127,8 +125,6 @@ function memoryBlock(memory: string[]): string {
   return `\n\nWhat we know about this visitor:\n${memory.map((fact) => `- ${fact}`).join("\n")}`;
 }
 
-type Understanding = { intent: "howto" | "feature" | "other"; feature: string };
-
 type BoundRoute = {
   steps: Step[];
   target: { route: string; key: string };
@@ -173,7 +169,8 @@ async function persistAnswer(input: {
   text: string;
   steps: Step[] | null;
   probes: ProbeResult[];
-  verdict: Verdict;
+  /** Null for an answer that ran no checks: there was no judgement to make. */
+  verdict: Verdict | null;
   request: FeatureRequest | null;
   grounding: unknown;
 }): Promise<Persisted> {
@@ -192,6 +189,118 @@ async function persistAnswer(input: {
     .select("id")
     .single();
   return { messageId: (data?.id as string) ?? "" };
+}
+
+/**
+ * Keeps whatever the visitor said about themselves, and never costs them their answer.
+ *
+ * This runs after the answer has been streamed, on every path, because small talk is exactly
+ * where a person says who they are.
+ */
+async function rememberQuietly(input: {
+  projectId: string;
+  conversationId: string;
+  visitorId: string | undefined;
+  question: string;
+  answer: string;
+  known: string[];
+}): Promise<void> {
+  try {
+    const learned = await rememberFromTurn(input);
+    if (learned.length === 0) return;
+    await emitTrace({
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      kind: "model",
+      title: "Remembered about this visitor",
+      detail: {
+        model: MODELS.understand,
+        purpose: "keep durable facts about the visitor",
+        output_summary: learned.join(" "),
+        facts: learned,
+      },
+      source: "agent",
+    });
+  } catch {
+    // Memory is a convenience. A failed extraction must never cost the user their answer.
+  }
+}
+
+/**
+ * The answer a known route gives, streamed whole. Returns false when the route cannot start from
+ * the page the visitor is on, and then the turn carries on and works it out again.
+ *
+ * `announce` is true when nothing has emitted `understanding` yet, which is the case for an exact
+ * intent-key hit: that one is served before the message is even read.
+ */
+async function* knownRouteTurn(input: {
+  projectId: string;
+  conversationId: string;
+  messageId: string;
+  page: PageContext;
+  graph: StoredGraph;
+  cached: KnownRoute;
+  memory: string[];
+  announce: boolean;
+  turnStarted: number;
+}): AsyncGenerator<ChatEvent, boolean> {
+  const { projectId, conversationId, page, graph, cached, turnStarted } = input;
+  const route = routeFromHere(graph, page, cached.target);
+  if ("failed" in route) return false;
+
+  if (input.announce) {
+    yield { type: "understanding", feature: cached.feature, intent: "product", memory: input.memory };
+  }
+  const plan: PlanSummary = { source: "cached", total: route.steps.length, destination: route.destination };
+  const verdict: Verdict = {
+    outcome: "answer",
+    confidence: 0.9,
+    reasoning: `A question with this intent resolved before to "${cached.target.key.split("|")[1] ?? ""}" on ${route.destination.title}.`,
+    feature: cached.feature,
+  };
+  const persisted = await persistAnswer({
+    conversationId,
+    text: cached.answer,
+    steps: route.steps,
+    probes: [],
+    verdict,
+    request: null,
+    grounding: null,
+  });
+  void emitTrace({
+    projectId,
+    conversationId,
+    kind: "decision",
+    title: `Known route: ${route.steps.length} step${route.steps.length === 1 ? "" : "s"} from the product map`,
+    detail: {
+      source: "cached",
+      intent: cached.intent,
+      feature: cached.feature,
+      target: cached.target,
+      destination: route.destination,
+      steps: route.steps.map((step) => step.caption),
+      modelCalls: input.announce ? 0 : 1,
+      latencyMs: Date.now() - turnStarted,
+    },
+    source: "agent",
+  });
+  yield {
+    type: "answer",
+    text: cached.answer,
+    steps: route.steps,
+    escalation: { offered: false },
+    noted: false,
+    plan,
+    sources: cached.sources,
+  };
+  yield { type: "conversation", conversationId, messageId: persisted.messageId || input.messageId };
+  void touchKnownRoute(cached.id, cached.hitCount).catch(() => undefined);
+  // The console's outcome, without a model: the walk was shown, and that is the summary.
+  await serviceClient()
+    .from("conversation")
+    .update({ outcome: "solved", summary: `Showed the way to ${cached.feature} from a known route.` })
+    .eq("id", conversationId);
+  return true;
 }
 
 export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
@@ -221,13 +330,15 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   const messageId = (userMessage?.id as string) ?? "";
   yield { type: "conversation", conversationId, messageId };
 
-  // 2. The page joins the site graph, and a question asked before answers from it at once.
+  // 2. The page joins the site graph, and everything the turn might need starts together.
   //
   // The scan is what makes the current page a node a route can start from, so it is written
   // before the graph is read. The visitor's facts and the exact-intent lookup need no model and
   // run beside it.
   const turnStarted = Date.now();
   const intent = intentKey(question);
+  // Every product question needs this vector, and it is the longest cheap thing in the turn, so
+  // it runs beside the reading. A message that turns out to be small talk never reads it.
   const questionEmbedding = embed([question]).then(([vector]) => {
     if (!vector) throw new Error("The embedding service returned nothing for the question");
     return vector;
@@ -235,117 +346,131 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   // Claimed here so a failure surfaces at the probe that uses it, not as an unhandled rejection.
   questionEmbedding.catch(() => undefined);
 
-  // The understanding call is the longest thing a new question waits on, so it starts now, beside
-  // the lookups. A known route makes it unnecessary, and then its answer is simply not read.
+  // Reading the message is the one thing every turn waits on, so it starts now, beside the
+  // lookups and the graph. What it decides is which of them are read at all.
   const understandStarted = Date.now();
-  const understandingPromise = chatJson<Understanding>(
-    MODELS.understand,
-    [
-      {
-        role: "system",
-        content:
-          "Read one support question. Name the capability the user wants, in their own terms, in two to five words: what they want to do, not the area of the product it belongs to. For example 'finding seats together' or 'changing a seat', never 'seat selection' for both. Answer with JSON only.",
-      },
-      { role: "user", content: question },
-    ],
-    UNDERSTANDING_SCHEMA,
-    { name: "understanding", maxTokens: 2000, effort: EFFORT.understand },
-  );
+  const understandingPromise = understand(question, page);
   understandingPromise.catch(() => undefined);
+  const graphPromise = loadGraph(projectId);
+  graphPromise.catch(() => undefined);
 
   const [, memory, known] = await Promise.all([
     recordScan(projectId, page, "widget").catch(() => undefined),
     loadVisitorFacts(projectId, input.visitorId),
     findKnownRoute(projectId, intent).catch(() => null),
   ]);
-  const graph = await loadGraph(projectId);
 
-  let cached: KnownRoute | null = known;
-  if (!cached) {
-    // A new wording of a known question costs the embedding the docs check needs anyway.
-    cached = await questionEmbedding.then((vector) => nearestKnownRoute(projectId, vector)).catch(() => null);
-  }
-  if (cached) {
-    const route = routeFromHere(graph, page, cached.target);
-    if (!("failed" in route)) {
-      yield { type: "understanding", feature: cached.feature, intent: "howto", memory };
-      const plan: PlanSummary = { source: "cached", total: route.steps.length, destination: route.destination };
-      const verdict: Verdict = {
-        outcome: "answer",
-        confidence: 0.9,
-        reasoning: `A question with this intent resolved before to "${cached.target.key.split("|")[1] ?? ""}" on ${route.destination.title}.`,
-        feature: cached.feature,
-      };
-      const persisted = await persistAnswer({
-        conversationId,
-        text: cached.answer,
-        steps: route.steps,
-        probes: [],
-        verdict,
-        request: null,
-        grounding: null,
-      });
-      void emitTrace({
-        projectId,
-        conversationId,
-        kind: "decision",
-        title: `Known route: ${route.steps.length} step${route.steps.length === 1 ? "" : "s"} from the product map`,
-        detail: {
-          source: "cached",
-          intent: cached.intent,
-          feature: cached.feature,
-          target: cached.target,
-          destination: route.destination,
-          steps: route.steps.map((step) => step.caption),
-          modelCalls: 0,
-          latencyMs: Date.now() - turnStarted,
-        },
-        source: "agent",
-      });
-      yield {
-        type: "answer",
-        text: cached.answer,
-        steps: route.steps,
-        escalation: { offered: false },
-        noted: false,
-        plan,
-        sources: cached.sources,
-      };
-      yield { type: "conversation", conversationId, messageId: persisted.messageId || messageId };
-      void touchKnownRoute(cached.id, cached.hitCount).catch(() => undefined);
-      // The console's outcome, without a model: the walk was shown, and that is the summary.
-      await db
-        .from("conversation")
-        .update({ outcome: "solved", summary: `Showed the way to ${cached.feature} from a known route.` })
-        .eq("id", conversationId);
-      return;
-    }
+  // 3. An exact intent-key hit is this question asked again: the same concepts, in a question
+  // that already resolved to a control on this site. It is served from the product map before
+  // the message is even read, which is what keeps a repeat under a second and free of a model.
+  const graphForKnown = known ? await graphPromise : null;
+  if (known && graphForKnown) {
+    const served = yield* knownRouteTurn({
+      projectId,
+      conversationId,
+      messageId,
+      page,
+      graph: graphForKnown,
+      cached: known,
+      memory,
+      announce: true,
+      turnStarted,
+    });
+    if (served) return;
   }
 
-  // 3. Understand what the user is actually asking about.
+  // 4. Read the message: what kind it is, and what capability it names.
   const understanding = await understandingPromise;
   const understandMs = Date.now() - understandStarted;
   void emitTrace({
     projectId,
     conversationId,
     kind: "model",
-    title: "Understood the question",
+    title: `Read the message: ${understanding.intent}`,
     detail: {
       model: MODELS.understand,
-      purpose: "name the capability the question is about",
-      output_summary: understanding.feature,
+      purpose: "decide what kind of message this is and name the capability it is about",
+      output_summary: understanding.feature || understanding.intent,
+      intent: understanding.intent,
       latencyMs: understandMs,
     },
     source: "agent",
   });
-  yield {
-    type: "understanding",
-    feature: understanding.feature,
-    intent: understanding.intent,
-    memory,
-  };
+  yield { type: "understanding", feature: understanding.feature, intent: understanding.intent, memory };
 
-  // 4. Three independent checks, run together so the slowest bounds the turn.
+  // 5. A message that is not about what the product can do is answered here, and no check runs.
+  if (understanding.intent === "chat" || understanding.intent === "page") {
+    const chatting = understanding.intent === "chat";
+    const direct = chatting
+      ? await answerChat({ question, page, memory })
+      : await answerFromPage({ question, page, memory });
+    void emitTrace({
+      projectId,
+      conversationId,
+      kind: "model",
+      title: chatting ? "Answered without the checks" : "Answered from this page",
+      detail: {
+        model: MODELS.understand,
+        purpose: understanding.intent,
+        output_summary: direct.text,
+        latencyMs: direct.latencyMs,
+      },
+      source: "agent",
+    });
+    const persisted = await persistAnswer({
+      conversationId,
+      text: direct.text,
+      steps: null,
+      probes: [],
+      verdict: null,
+      request: null,
+      grounding: null,
+    });
+    yield { type: "answer", text: direct.text, steps: null, escalation: { offered: false }, noted: false };
+    yield { type: "conversation", conversationId, messageId: persisted.messageId || messageId };
+    // The console's outcome, without a model: nothing was checked, so there is nothing to judge.
+    await db
+      .from("conversation")
+      .update({
+        outcome: direct.answered ? "solved" : "unresolved",
+        summary: chatting
+          ? "Answered a message that was not about the product."
+          : direct.answered
+            ? "Answered from the page the visitor was on."
+            : "The page the visitor was on did not show the answer.",
+      })
+      .eq("id", conversationId);
+    await rememberQuietly({
+      projectId,
+      conversationId,
+      visitorId: input.visitorId,
+      question,
+      answer: direct.text,
+      known: memory,
+    });
+    return;
+  }
+
+  // 6. A wording of this question resolved before: the answer is the route, planned again from
+  // this page. A nearer wording only counts once the message is known to be about the product.
+  const graph = await graphPromise;
+  const nearest = await questionEmbedding.then((vector) => nearestKnownRoute(projectId, vector)).catch(() => null);
+  if (nearest) {
+    const served = yield* knownRouteTurn({
+      projectId,
+      conversationId,
+      messageId,
+      page,
+      graph,
+      cached: nearest,
+      memory,
+      announce: false,
+      turnStarted,
+    });
+    if (served) return;
+  }
+
+  // 7. Three independent checks, run together so the slowest bounds the turn.
   for (const probe of ["docs", "interface", "repository"] as const) {
     yield { type: "probe", probe, status: "running" };
   }
@@ -375,7 +500,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     });
   }
 
-  // 5. Route on the evidence. Absence is confirmed by a reasoning model.
+  // 8. Route on the evidence. Absence is confirmed by a reasoning model.
   let outcome = routeProbes(probes, input.thresholds);
   let verdict: Verdict = {
     outcome,
@@ -423,7 +548,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     source: "agent",
   });
 
-  // 6. Answer.
+  // 9. Answer.
   let text = "";
   let steps: Step[] | null = null;
   let request: FeatureRequest | null = null;
@@ -615,9 +740,38 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     const where = searched && searched.controls > 0
       ? `I checked the documentation, this page, and ${searched.pages} ${searched.pages === 1 ? "page" : "pages"} with ${searched.controls} controls of this product, and found nothing.`
       : "I checked the documentation, this page, and what this product is known to do, and found nothing.";
+
+    // A mixed message asked something general and something about the product in one breath. The
+    // documentation often answers the general half even when the product half is missing, and
+    // reading that out first is more use to the visitor than an apology on its own.
+    const passages = (Array.isArray(docs.evidence) ? docs.evidence : []) as DocsEvidence[];
+    const relevant = passages.length > 0 && (docs.score ?? 0) >= DOCS_SURE_MISS;
+    const fromDocs =
+      understanding.intent === "mixed" && outcome === "absent" && relevant
+        ? await answerFromPassage({ question, docs: passages })
+        : null;
+    if (fromDocs?.answered) {
+      void emitTrace({
+        projectId,
+        conversationId,
+        kind: "model",
+        title: "Answered the part the documentation covers",
+        detail: {
+          model: MODELS.understand,
+          purpose: "answer a mixed question from the documentation before stating the absence",
+          output_summary: fromDocs.text,
+          latencyMs: fromDocs.latencyMs,
+        },
+        source: "agent",
+      });
+      sources = sourcesFrom(passages);
+    }
+
     text =
       outcome === "absent"
-        ? `I am sorry, there is no way of ${understanding.feature} here today. ${where}${offer}`
+        ? fromDocs?.answered
+          ? `${fromDocs.text} There is still no way of ${understanding.feature} here today. ${where}${offer}`
+          : `I am sorry, there is no way of ${understanding.feature} here today. ${where}${offer}`
         : `I could not confirm that ${understanding.feature} is possible here. I did not find it in the documentation or on this page.${offer}`;
   }
 
@@ -653,36 +807,17 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   // The widget escalates against the assistant message, so hand its id back.
   yield { type: "conversation", conversationId, messageId: persisted.messageId || messageId };
 
-  // 7. Remember anything durable the visitor said about themselves, for their next visit.
-  try {
-    const learned = await rememberFromTurn({
-      projectId,
-      visitorId: input.visitorId,
-      conversationId,
-      question,
-      answer: text,
-      known: memory,
-    });
-    if (learned.length > 0) {
-      await emitTrace({
-        projectId,
-        conversationId,
-        kind: "model",
-        title: "Remembered about this visitor",
-        detail: {
-          model: MODELS.understand,
-          purpose: "keep durable facts about the visitor",
-          output_summary: learned.join(" "),
-          facts: learned,
-        },
-        source: "agent",
-      });
-    }
-  } catch {
-    // Memory is a convenience. A failed extraction must never cost the user their answer.
-  }
+  // 10. Remember anything durable the visitor said about themselves, for their next visit.
+  await rememberQuietly({
+    projectId,
+    conversationId,
+    visitorId: input.visitorId,
+    question,
+    answer: text,
+    known: memory,
+  });
 
-  // 8. Record how this ended. The user already has the answer; this is only for the console.
+  // 11. Record how this ended. The user already has the answer; this is only for the console.
   try {
     await closeConversation({ conversationId, question, answer: text, steps, verdict });
   } catch {
