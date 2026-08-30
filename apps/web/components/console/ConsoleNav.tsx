@@ -10,6 +10,7 @@ import { Mark } from "@/components/landing/Mark";
 const LINKS = [
   { href: "/console", label: "Overview" },
   { href: "/console/knowledge", label: "Knowledge" },
+  { href: "/console/map", label: "Product map" },
   { href: "/console/conversations", label: "Conversations" },
   { href: "/console/repository", label: "Repository" },
   { href: "/console/activity", label: "Activity" },
