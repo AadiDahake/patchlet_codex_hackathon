@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -86,3 +87,46 @@ def test_unified_diffs_marks_a_deletion_against_dev_null(tmp_path: Path) -> None
     assert "+++ /dev/null" in by_path["gone.ts"]
     assert "-line one" in by_path["gone.ts"]
     assert "--- /dev/null" in by_path["kept.ts"]
+
+
+def _package(tmp_path: Path, scripts: dict[str, str]) -> None:
+    (tmp_path / "package.json").write_text(f'{{"scripts": {json.dumps(scripts)}}}\n')
+
+
+def test_package_scripts_reads_what_the_repository_defines(tmp_path: Path) -> None:
+    _package(tmp_path, {"typecheck": "tsc", "build": "next build", "test": "vitest run"})
+    assert applier.package_scripts(tmp_path) == {"typecheck", "build", "test"}
+
+
+def test_package_scripts_is_empty_without_a_readable_package_json(tmp_path: Path) -> None:
+    assert applier.package_scripts(tmp_path) == set()
+    (tmp_path / "package.json").write_text("{not json")
+    assert applier.package_scripts(tmp_path) == set()
+
+
+def test_run_gates_runs_the_repository_own_tests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """typecheck and build both passed on a draft that broke the target's contract test."""
+    _package(tmp_path, {"typecheck": "tsc", "build": "next build", "test": "vitest run"})
+    ran: list[list[str]] = []
+    monkeypatch.setattr(applier, "timed_command", lambda root, args, **k: (ran.append(args) or (True, "", 1.0)))
+
+    results = applier.run_gates(tmp_path, "slug", install=False)
+
+    assert [args[-1] for args in ran] == ["typecheck", "test", "build"]
+    assert [r.name for r in results] == ["npm run typecheck", "npm test", "npm run build"]
+
+
+def test_run_gates_skips_a_gate_the_repository_does_not_define(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _package(tmp_path, {"build": "next build"})
+    monkeypatch.setattr(applier, "timed_command", lambda root, args, **k: (True, "", 1.0))
+    assert [r.name for r in applier.run_gates(tmp_path, "slug", install=False)] == ["npm run build"]
+
+
+def test_run_gates_stops_at_the_first_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _package(tmp_path, {"typecheck": "tsc", "build": "next build", "test": "vitest run"})
+    monkeypatch.setattr(
+        applier, "timed_command",
+        lambda root, args, **k: (args[-1] != "test", "3 failed" if args[-1] == "test" else "", 1.0),
+    )
+    results = applier.run_gates(tmp_path, "slug", install=False)
+    assert [(r.name, r.ok) for r in results] == [("npm run typecheck", True), ("npm test", False)]

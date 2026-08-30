@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -179,16 +180,45 @@ def ensure_node_modules(root: Path, repo_slug: str) -> GateResult:
     return GateResult("npm ci", ok, output[-8000:], duration_s=time.monotonic() - started)
 
 
+# The gates, cheapest first, so a broken draft is told so before the slow one runs.
+#
+# `test` is here because typecheck and build are not enough on their own. A drafted change once
+# passed both and still broke the target repository's own contract test: it added the two exports
+# that repository documents, with a signature the test does not call. Nothing but running the suite
+# would have caught it, and the repair round fixes what the gates report.
+#
+# `e2e` is deliberately not a gate: it wants a browser and a server, and it is a separate script in
+# every repository the worker targets.
+GATES: tuple[tuple[str, str], ...] = (
+    ("npm run typecheck", "typecheck"),
+    ("npm test", "test"),
+    ("npm run build", "build"),
+)
+
+
+def package_scripts(root: Path) -> set[str]:
+    """The script names package.json defines, so the worker only runs gates that exist."""
+    try:
+        data = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    scripts = data.get("scripts")
+    return set(scripts) if isinstance(scripts, dict) else set()
+
+
 def run_gates(root: Path, repo_slug: str, install: bool = True) -> list[GateResult]:
-    """Run the gates in order and stop at the first failure."""
+    """Run every gate the repository defines, in order, and stop at the first failure."""
     results: list[GateResult] = []
     if install:
         install_result = ensure_node_modules(root, repo_slug)
         results.append(install_result)
         if not install_result.ok:
             return results
-    for name, args in (("npm run typecheck", ["npm", "run", "--silent", "typecheck"]), ("npm run build", ["npm", "run", "--silent", "build"])):
-        ok, output, seconds = timed_command(root, args)
+    scripts = package_scripts(root)
+    for name, script in GATES:
+        if script not in scripts:
+            continue
+        ok, output, seconds = timed_command(root, ["npm", "run", "--silent", script])
         results.append(GateResult(name, ok, output[-8000:], duration_s=seconds))
         if not ok:
             break
