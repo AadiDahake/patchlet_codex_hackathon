@@ -156,6 +156,44 @@ Three rules make that safe, and they hold for anything added here later:
   `apps/web/test/fixtures/intents.ts` hold it to them. `understand.live.test.ts` runs them against
   the real model and skips itself without a key; change the prompt and run it.
 
+## Only the site the project names teaches the product map
+
+The map is what a route is planned over, so a control on it is a control the agent will tell a
+visitor to press. A preview deployment of an unmerged branch serves the same product on another
+origin, and one question asked on one of its pages used to add its controls to the live project's
+map and pin a `known_route` to them; every visitor on the live site was then walked to a button
+that is not there.
+
+`belongsToSite` in `apps/web/lib/graph/origin.ts` is the one rule: a scan whose origin differs from
+the origin of the project's `site_url` writes nothing - no page, no affordance, no transition, no
+known route - and the turn still answers from that page's live controls. A project with no
+`site_url` has not said where it lives, so every scan is taken. Both doors into the map obey it:
+the turn's page-join and `POST /api/site/observe`. Anything added later that writes to the map
+follows the same rule.
+
+`npm run demo:reset` clears `known_route` with the rest, because a remembered route answers a
+question before a single check runs and would otherwise pin the last run's answer to the next one.
+
+## A GitHub issue is opened by a person, and only ever one per gap
+
+Filing in the customer's repository is an outward action. The only thing that authorises it is a
+visitor accepting "Report to developers"; `noteRequest` records the group for the opportunity
+dashboard and starts no run, so a question the visitor then says was not needed leaves nothing
+behind in anyone's repository.
+
+The reported gap is then one issue however the runs overlap. Two runs for one group can both read
+a group whose `issue_number` is still null, so `services/worker/steps/pipeline.py` claims
+`feature_request_group.issue_claim` with one conditional update before filing; the loser waits for
+the winner's number and comments on that issue. Section 4 of `docs/contracts.md` has the table.
+
+## A blip on the wire is not a verdict on the request
+
+Every Supabase and GitHub call in `services/worker` goes through `steps/retry.py`: a dropped
+connection or a "not now" status is retried a few times, and an answer about the request itself (a
+404, a 422) is returned untouched. `pipeline.fail` never marks a run failed while its pull request
+is open, writes the failure into the trace in words a person can act on, leaves the issue open and
+puts the group back in a state a later report can start from.
+
 ## A route is only ever planned to a control that does the thing
 
 `coversCapability` in `@patchlet/shared` is the one rule behind every "is this the control for it"

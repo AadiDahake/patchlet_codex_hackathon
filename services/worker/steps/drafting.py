@@ -10,7 +10,7 @@ from steps import applier, codegen, llm, repo
 from steps.reporter import Reporter
 
 MAX_REPAIRS = 3
-MAX_CANDIDATES = 2
+MAX_CANDIDATES = 3
 # How much of a file the gate named but the plan does not touch goes into a repair.
 CONTEXT_FILE_CHARS = 9000
 
@@ -23,6 +23,26 @@ def _affected_paths(output: str, files: dict[str, str]) -> list[str]:
 
 
 NAMED_PATH_RE = re.compile(r"[\w./\[\]-]+\.(?:ts|tsx|js|jsx|mjs|css)")
+
+TEST_PATH_RE = re.compile(r"(?:^|/)(?:tests?|__tests__)/|\.(?:test|spec)\.[cm]?[jt]sx?$")
+
+
+def _own_new_tests(output: str, files: dict[str, str], originals: dict[str, str | None]) -> list[str]:
+    """Test files this change itself added that the failing gate names.
+
+    A gate failing on a test the repository already had is the repository saying no. A gate failing
+    only on a test this change wrote is the change disagreeing with itself, and starting over from
+    a blank candidate throws away work that was nearly right. So the repair is told which tests are
+    its own and given the failing output, and may correct either side.
+    """
+    lowered = output.lower()
+    return [
+        path
+        for path in files
+        if originals.get(path) is None
+        and TEST_PATH_RE.search(path)
+        and (path.lower() in lowered or Path(path).name.lower() in lowered)
+    ]
 
 
 def _witnesses(root: Path, output: str, planned: set[str], limit: int = 2) -> dict[str, str]:
@@ -122,10 +142,13 @@ def draft_with_gates(
             repairs += 1
             total_repairs += 1
             witnesses = _witnesses(root, failure.output, set(files) | set(deletions))
+            own_tests = _own_new_tests(failure.output, files, originals)
             for path in _affected_paths(failure.output, files):
                 context = {p: c for p, c in files.items() if p != path}
                 context.update(witnesses)
-                files[path] = codegen.repair_file(path, files[path], failure.output, agents_md, context, dependencies)
+                files[path] = codegen.repair_file(
+                    path, files[path], failure.output, agents_md, context, dependencies, own_tests
+                )
                 reporter.model(
                     f"Repaired {path} after {failure.name} failed (repair {repairs}/{MAX_REPAIRS}, {label})",
                     llm.EDITOR_MODEL,

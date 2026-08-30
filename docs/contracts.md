@@ -124,6 +124,10 @@ create table feature_request_group (
   issue_number int,
   pr_url text,
   escalation_id uuid references escalation on delete set null,  -- the run carrying it now
+  -- Migration 0018: the run currently filing this group's issue. Claimed with one conditional
+  -- update, so two overlapping runs cannot both file, and cleared when the number lands or the
+  -- run that held it fails.
+  issue_claim uuid references escalation on delete set null,
   first_seen timestamptz not null default now(),
   last_seen timestamptz not null default now()
 );
@@ -684,10 +688,14 @@ group id. Two rows land on the conversation that triggered the run with `source:
 
 1. Insert the conversation if it is new, insert the user message, emit `conversation`.
 2. **Record and recall.** The page the question was asked on is written into the site graph
-   (`recordScan`), so a route can start from it. The question's intent key (its concepts, sorted)
-   is looked up in `known_route`; a miss is retried by the question's embedding at cosine 0.92 or
-   above once it is in flight. The question's embedding, the site graph and the read below all
-   start here, together.
+   (`recordScan`), so a route can start from it - but only when its origin is the origin of the
+   project's `site_url` (`apps/web/lib/graph/origin.ts`). A page from anywhere else, a preview
+   deployment of an unmerged branch above all, still answers the question from its live controls
+   and writes nothing: no page, no affordance, no transition and no `known_route`. A project with
+   no `site_url` has not said where it lives, so every scan is taken. `POST /api/site/observe`
+   applies the same rule. The question's intent key (its concepts, sorted) is looked up in
+   `known_route`; a miss is retried by the question's embedding at cosine 0.92 or above once it is
+   in flight. The question's embedding, the site graph and the read below all start here, together.
 3. **Read the message** with `MODELS.understand` and a JSON schema (`agent/understand.ts`):
    `{intent, feature}`. `intent` is the `MessageIntent` the rest of the turn is routed on, and
    `feature` names the capability in the user's own terms ("changing a seat", "finding seats
@@ -813,16 +821,28 @@ the user asked for it to be reported or not, goes through `apps/web/lib/agent/re
    `priorityFor` then recomputes the group: `high` at two user reports or five detections, `medium`
    at one user report or three detections, `low` otherwise.
 3. `actionFor` decides what the worker does about it, and `apps/web/lib/agent/runner.ts` inserts one
-   `escalation` row for that run and starts it:
+   `escalation` row for that run and starts it. **Only a user's report reaches step 3.** The
+   agent's own note (`noteRequest`) stops after step 2: the group and its counts are what the
+   opportunity dashboard reads, and nothing is filed in the customer's repository for a question
+   nobody asked to have reported. `noted: true` on the answer means exactly that, and no more.
 
 | Group | Run `mode` | What happens |
 |---|---|---|
-| new | `file_only` | files the issue, labels `patchlet`, `priority:low`, `auto-detected`, and stops. No pull request is drafted for something nobody has reported. |
+| new | `file_only` | files the issue, labels `patchlet` and its priority, and stops. No pull request is drafted for a gap one person has hit once. |
 | reached `medium` or `high`, nothing drafted yet | `full` | the same workflow the user-reported path has always run: the issue is updated with the new labels, count and quote, then the change is drafted and a draft pull request is opened. |
 | already drafting, or already has a pull request | `update` | the count line, the priority line and the labels are brought up to date and the new quote is added as a comment on the issue and on the pull request. Never a second pull request. |
 
 A project with no repository bound still accumulates the group and its counts; there is simply
-nowhere to file it, so no run starts.
+nowhere to file it, so no run starts. The widget is only ever told a repository is missing when the
+project row really has none: `runTurn` reads `project.repo_full_name` itself before it offers,
+because "the team has not connected a repository yet" is a claim about the customer.
+
+**One gap in one group is one GitHub issue, whatever order the runs reach GitHub in.** Two runs for
+the same group can overlap, and both can read a group whose `issue_number` is still null. So
+`file_issue` re-reads the group and then claims `feature_request_group.issue_claim` with one
+conditional update (migration 0018). The winner files and writes `issue_number`; every other run
+polls the group for that number and comments on the issue instead of opening a second one. A claim
+that never produces an issue is taken over after `ISSUE_WAIT_S`, and a failed run releases it.
 
 A turn that ends `absent`, and a report through `POST /api/escalate`, also enqueue one discovery
 for the group (`apps/web/lib/opportunity/queue.ts`): the second question, is this one person or a

@@ -381,8 +381,15 @@ def repair_file(
     agents_md: str,
     context: dict[str, str],
     dependencies: str = "",
+    own_new_tests: list[str] | None = None,
 ) -> str:
-    """Feed a failing gate back to the editor for one file."""
+    """Feed a failing gate back to the editor for one file.
+
+    `own_new_tests` names the test files this change itself added that the gate is failing on. They
+    are not a requirement the repository set: they are part of the change under review, so the
+    editor is told so and may correct either the test or the code it exercises. Without that it
+    treats its own draft test as fixed and keeps rewriting the wrong side.
+    """
     parts = ["# Repository conventions (AGENTS.md)\n\n" + agents_md.strip()]
     if dependencies:
         parts.append("# " + dependencies)
@@ -394,5 +401,14 @@ def repair_file(
         "Keep the feature intact. If a module cannot be found, it is not installed: remove that import and "
         "implement the same thing without it (inline SVG for icons, plain React state for logic).\n\nGate output:\n" + error_output[-6000:] + f"\n\nCurrent contents of `{target_path}`:\n{current}"
     )
+    if own_new_tests:
+        named = ", ".join(f"`{path}`" for path in own_new_tests)
+        parts.append(
+            f"# The failing test is one this change added\n\n{named} did not exist before this change, so it "
+            "is not a requirement of the repository: it is part of the change under review, and the gate output "
+            "above is its failing run. Decide which side is wrong and fix that one - the test's expectations or "
+            "the code they exercise - and keep the feature working. Do not delete the test and do not weaken it "
+            "into one that asserts nothing."
+        )
     parts.append("Return only the complete file contents, no code fences, no commentary.")
     return strip_fences(llm.complete(llm.EDITOR_MODEL, EDITOR_SYSTEM, "\n\n".join(parts)))

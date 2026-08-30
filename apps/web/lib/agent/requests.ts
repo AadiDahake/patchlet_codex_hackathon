@@ -203,55 +203,29 @@ export async function groupForMessage(messageId: string): Promise<string | null>
   return typeof groupId === "string" ? groupId : null;
 }
 
-/** The bits of a project a run needs, read once per report. */
-async function runProject(projectId: string): Promise<RunProject | null> {
-  const { data } = await serviceClient()
-    .from("project")
-    .select("id, repo_full_name, repo_default_branch, site_url")
-    .eq("id", projectId)
-    .maybeSingle();
-  const repo = (data as { repo_full_name?: unknown } | null)?.repo_full_name;
-  if (!data || typeof repo !== "string" || repo === "") return null;
-  const row = data as Record<string, unknown>;
-  return {
-    id: String(row.id),
-    repoFullName: repo,
-    defaultBranch: String(row.repo_default_branch ?? "main"),
-    siteUrl: row.site_url === null || row.site_url === undefined ? null : String(row.site_url),
-  };
-}
-
 /**
- * Records a gap the agent found on its own, whether or not the user asks for it to be reported.
+ * Records a gap the agent found on its own, so the console can see how often it comes back.
  *
- * This is the quiet half of reporting: a missing feature nobody reports is still a missing
- * feature, and the developers should hear about it - at the bottom of the pile, and louder every
- * time it comes back. Never throws: the user's answer must not depend on it.
+ * This is the quiet half of reporting, and it stays quiet: the group's counts rise and the
+ * opportunity dashboard gains a row, and nothing is filed anywhere. Filing an issue is an outward
+ * action in the customer's own repository, and the only thing that authorises it is a person
+ * accepting the offer - which is `reportRequest`, one issue per group. A visitor who says the
+ * feature is not needed must not end up having opened one.
+ *
+ * Never throws: the user's answer must not depend on it.
  */
 export async function noteRequest(input: {
   projectId: string;
   request: FeatureRequest;
-  conversationId?: string | null;
-  messageId?: string | null;
 }): Promise<{ noted: boolean; groupId: string | null }> {
   try {
-    const project = await runProject(input.projectId);
+    // Nowhere to file, by design: the `action` this returns is for the reporting path alone.
     const join = await recordRequest({
       projectId: input.projectId,
       request: input.request,
       source: "auto",
-      hasRepository: project !== null,
+      hasRepository: false,
     });
-    if (project && join.action !== "none") {
-      await startRun({
-        project,
-        group: join.group,
-        request: input.request,
-        mode: join.action,
-        conversationId: input.conversationId ?? null,
-        messageId: input.messageId ?? null,
-      });
-    }
     return { noted: true, groupId: join.group.id };
   } catch (error) {
     console.error("automatic request note failed:", (error as Error).message);

@@ -23,6 +23,8 @@ let answers: Record<string, unknown> = {};
 let chunks: Record<string, unknown>[] = [];
 /** Every write the turn made, in order. */
 const writes: { table: string; op: string; values: unknown }[] = [];
+/** The project row the turn reads when it needs to know what the project is bound to. */
+let projectRow: Record<string, unknown> = { id: "project-1", repo_full_name: "novaair/novaair" };
 
 vi.mock("@/lib/openai", () => ({
   chatJson: async (
@@ -65,6 +67,10 @@ class FakeQuery {
   async single(): Promise<{ data: { id: string }; error: null }> {
     return { data: { id: `${this.table}-1` }, error: null };
   }
+  // The project row as the database holds it, which is the authority on the repository binding.
+  async maybeSingle(): Promise<{ data: Record<string, unknown> | null; error: null }> {
+    return { data: this.table === "project" ? projectRow : null, error: null };
+  }
   // `update(...).eq(...)` is awaited without a terminal call of its own.
   then<T>(resolve: (value: { data: null; error: null }) => T): T {
     return resolve({ data: null, error: null });
@@ -86,11 +92,17 @@ let graph: typeof NOVAAIR_GRAPH = NOVAAIR_GRAPH;
 /** Every route the turn remembered for the next visitor. */
 const saved: unknown[] = [];
 
+/** Every page scan the turn wrote into the product map. */
+const scans: string[] = [];
+
 vi.mock("@/lib/graph/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/graph/store")>();
   return {
     ...actual,
-    recordScan: async () => "page-1",
+    recordScan: async (_projectId: string, page: PageContext) => {
+      scans.push(page.url);
+      return "page-1";
+    },
     loadGraph: async () => graph,
     findKnownRoute: async () => remembered,
     nearestKnownRoute: async () => null,
@@ -127,12 +139,14 @@ async function stream(
   question: string,
   page: PageContext = TRIP_PAGE,
   repoFullName: string | null = "novaair/novaair",
+  siteUrl: string | null = "http://localhost:4150",
 ): Promise<ChatEvent[]> {
   const events: ChatEvent[] = [];
   for await (const event of runTurn({
     projectId: "project-1",
     repoFullName,
     defaultBranch: "main",
+    siteUrl,
     question,
     page,
   })) {
@@ -193,6 +207,8 @@ beforeEach(() => {
   calls.length = 0;
   writes.length = 0;
   saved.length = 0;
+  scans.length = 0;
+  projectRow = { id: "project-1", repo_full_name: "novaair/novaair" };
   chunks = [];
   answers = {};
   remembered = null;
@@ -437,6 +453,7 @@ describe("a capability the product does not have", () => {
   });
 
   it("says so without offering a report when there is no repository to file against", async () => {
+    projectRow = { id: "project-1", repo_full_name: null };
     const answer = answerOf(await stream(SEATS_TOGETHER, SEAT_MAP, null));
     expect(answer?.text).not.toContain("report");
     expect(answer?.escalation).toMatchObject({ offered: false });
@@ -480,8 +497,84 @@ describe("the same question once the capability is built", () => {
   it("remembers the route, so the next visitor is answered without a model", async () => {
     answers.understanding = { intent: "product", feature: "finding seats together" };
     await stream("Okay, how do I get seats together now?", SEAT_MAP_AFTER);
+    expect(scans).toEqual([SEAT_MAP_AFTER.url]);
     expect(saved).toHaveLength(1);
     expect(saved[0]).toMatchObject({ target: { key: "button|find seats together|main|" } });
+  });
+
+  /**
+   * The same page, served by a preview deployment of the branch that adds the control. It is the
+   * product the project is bound to, but it is not the product its visitors are using, and a
+   * control learned here would be planned for someone standing on the live site tomorrow.
+   */
+  it("answers from a preview deployment and teaches the product map nothing", async () => {
+    answers.understanding = { intent: "product", feature: "finding seats together" };
+    const preview: PageContext = {
+      ...SEAT_MAP_AFTER,
+      url: "https://novaair-4vs9gj5jt-dahakeaadi-2078s-projects.vercel.app/trips/NVA7K2/seats",
+    };
+
+    const answer = answerOf(
+      await stream("Okay, how do I get seats together now?", preview, "novaair/novaair", "http://localhost:4150"),
+    );
+
+    // The visitor in front of it is still answered from the controls the page really has.
+    expect(answer?.steps?.map((step) => step.target)).toEqual(["s6"]);
+    // And nothing about that page is written down.
+    expect(scans).toEqual([]);
+    expect(saved).toEqual([]);
+  });
+
+  it("still learns from a project that has not said where its site is", async () => {
+    answers.understanding = { intent: "product", feature: "finding seats together" };
+    await stream("Okay, how do I get seats together now?", SEAT_MAP_AFTER, "novaair/novaair", null);
+    expect(scans).toEqual([SEAT_MAP_AFTER.url]);
+    expect(saved).toHaveLength(1);
+  });
+});
+
+/**
+ * "The team has not connected a repository yet" is a claim about the customer, shown to their
+ * visitors as a fact. It is only ever made from the binding the project row carries, never from a
+ * name this turn happened to be started without.
+ */
+describe("a project whose repository is bound", () => {
+  beforeEach(() => {
+    chunks = [CHILDREN_PASSAGE];
+    answers = {
+      understanding: { intent: "product", feature: "finding seats together" },
+      passage_read: { covers: false, reason: "it says to move one passenger at a time" },
+      verdict: { exists: false, confidence: 0.9, reasoning: "no control and no passage says it can be done" },
+      feature_request: {
+        title: "Find seats together for a party",
+        description: "Let a family take three seats side by side in one move.",
+        area: "seats",
+        quote: "Can you find us three seats together?",
+        rationale: "Today they rebook one passenger at a time.",
+      },
+    };
+  });
+
+  it("offers the report even when the turn was started without the repository name", async () => {
+    projectRow = { id: "project-1", repo_full_name: "AadiDahake/novaair" };
+    const answer = answerOf(await stream(SEATS_TOGETHER, SEAT_MAP, null));
+
+    expect(answer?.escalation).toMatchObject({ offered: true });
+    expect(answer?.text).toContain("I can report this to the developers");
+  });
+
+  it("says a repository is missing only when the project really has none", async () => {
+    projectRow = { id: "project-1", repo_full_name: null };
+    const answer = answerOf(await stream(SEATS_TOGETHER, SEAT_MAP, null));
+
+    expect(answer?.escalation).toEqual({ offered: false, reason: "no_repository" });
+    expect(answer?.text).not.toContain("report");
+  });
+
+  it("treats a binding of empty text as no binding at all", async () => {
+    projectRow = { id: "project-1", repo_full_name: "   " };
+    const answer = answerOf(await stream(SEATS_TOGETHER, SEAT_MAP, ""));
+    expect(answer?.escalation).toEqual({ offered: false, reason: "no_repository" });
   });
 });
 
