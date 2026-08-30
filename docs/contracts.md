@@ -626,7 +626,7 @@ to run the compiler with no key, is in `docs/capability-compiler.md`.
 Every variable is described in `.env.example` and read through `apps/web/lib/env.ts`. The forge
 engine's: `ESCALATION_ENGINE=forge` selects it; `FORGE_STRATEGY` (`reflex` | `runloop` | `local`,
 default by the keys present) selects where candidates build; `REFLEX_API_KEY`,
-`REFLEX_ORGANIZATION_ID`, `REFLEX_API_URL` and the three `REFLEX_PERSONA_*` ids for Reflex;
+`REFLEX_ORG`, `REFLEX_API_URL` and `REFLEX_PERSONA_BUILDER`, `REFLEX_PERSONA_UX`, `REFLEX_PERSONA_VERIFIER` for Reflex;
 `RUNLOOP_API_KEY` and the optional `RUNLOOP_BLUEPRINT` for Runloop devboxes (also the agent's
 devbox under Reflex); `FORGE_TARGET_REPO` (default `AadiDahake/novaair`) when the project has no
 repository bound; `FORGE_LOCAL_CACHE_DIR` for the local strategy's clone; `OPENAI_API_KEY` for

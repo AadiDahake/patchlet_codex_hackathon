@@ -32,9 +32,9 @@ engine_unavailable` when it cannot run.
 ### Reflex
 
 The three personas are created once in the Reflex web app, from the prompts in
-`apps/web/lib/forge/prompts/*.md`, and their `prs_...` ids go in `REFLEX_PERSONA_CAPABILITY_BUILDER`,
-`REFLEX_PERSONA_UX_BUILDER` and `REFLEX_PERSONA_CAPABILITY_VERIFIER`. Every call carries
-`x-organization-id` (`REFLEX_ORGANIZATION_ID`, default `doing_something`) and the `rfx_` key.
+`apps/web/lib/forge/prompts/*.md`, and their `prs_...` ids go in `REFLEX_PERSONA_BUILDER`,
+`REFLEX_PERSONA_UX` and `REFLEX_PERSONA_VERIFIER`. Every call carries
+`x-organization-id` (`REFLEX_ORG`, default `doing_something`) and the `rfx_` key.
 
 One candidate is a chain of three agents (`reflex.ts`):
 
@@ -53,6 +53,14 @@ One candidate is a chain of three agents (`reflex.ts`):
    agent's `tunnelKey`. `RUNLOOP_API_KEY` is therefore required beside the Reflex key.
 
 Teardown stops the agent, shuts the devbox down and deletes the run's snapshots.
+
+Patchlet owns the trigger. The Reflex web app shows an Automations tab, but the public OpenAPI
+document (`runloopai/reflex-os`, re-read on 2026-08-29 after the personas were created) has no
+automation, trigger, schedule, flow or webhook resource among its 173 paths; the one "webhook" in
+it is an event type in the stream enum. So `missing_capability.discovered` is Patchlet's own event,
+`POST /api/opportunities/:groupId/forge` is the automation, and the personas are launched by id.
+If a webhook trigger appears on the API, it replaces that route's call to `startForgeRun` and
+nothing below it changes.
 
 ### Runloop
 
