@@ -52,6 +52,50 @@ export function githubOauthApp(): { clientId: string; clientSecret: string; redi
 /** Vercel token used to watch the target project's deployments. */
 export const vercelToken = (): string => required("VERCEL_TOKEN");
 
+/** PostHog personal API key with `query:read` and `session_recording:read`. Server-side only. */
+export const posthogPersonalApiKey = (): string => required("POSTHOG_PERSONAL_API_KEY");
+
+/** The numeric id of the PostHog project the host product sends its events to. */
+export const posthogProjectId = (): string => required("POSTHOG_PROJECT_ID");
+
+/** The private API host: `https://us.posthog.com` on US Cloud, `https://eu.posthog.com` on EU. */
+export const posthogHost = (): string => optional("POSTHOG_HOST", "https://us.posthog.com");
+
+/** True when the two variables that make PostHog reachable are both set. */
+export const posthogConfigured = (): boolean =>
+  Boolean(process.env.POSTHOG_PERSONAL_API_KEY && process.env.POSTHOG_PROJECT_ID);
+
+/** How far back the miner looks for sessions, in days. */
+export const posthogWindowDays = (): number => {
+  const value = Number(optional("POSTHOG_WINDOW_DAYS", "90"));
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 90;
+};
+
+export type DiscoveryMode = "inline" | "runner";
+
+/**
+ * Who executes a queued discovery.
+ *
+ * `inline` lets the request that enqueued it run it after the response, which is right on a
+ * laptop. `runner` leaves it for `npm run discover:runner`, which is right on a host that caps a
+ * request's duration. The default follows the host: `runner` on Vercel, `inline` elsewhere.
+ */
+export function discoveryMode(): DiscoveryMode {
+  const explicit = process.env.DISCOVERY_MODE;
+  if (explicit === "inline" || explicit === "runner") return explicit;
+  return process.env.VERCEL ? "runner" : "inline";
+}
+
+/**
+ * A shared secret a terminal client presents as a bearer token in place of a session cookie,
+ * with the slug of the project it may read. Off unless the token is set.
+ */
+export function consoleToken(): { token: string; projectSlug: string } | null {
+  const token = process.env.PATCHLET_CONSOLE_TOKEN;
+  if (!token) return null;
+  return { token, projectSlug: optional("PATCHLET_CONSOLE_PROJECT", "novaair") };
+}
+
 /**
  * The key Codex runs with inside a sandbox, or null to run on the machine's own saved Codex
  * login. The local strategy accepts null; a devbox has no login, so the Runloop strategy does not.
