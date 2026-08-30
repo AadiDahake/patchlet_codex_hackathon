@@ -94,7 +94,17 @@ vi.mock("@/lib/agent/memory", () => ({
 
 vi.mock("@/lib/agent/summary", () => ({ closeConversation: async () => "solved" }));
 
-vi.mock("@/lib/agent/requests", () => ({ noteRequest: async () => false }));
+vi.mock("@/lib/agent/requests", () => ({
+  noteRequest: async () => ({ noted: true, groupId: "group-1" }),
+}));
+
+/** The opportunity pipeline the absence path enqueues, kept off this turn and out of the network. */
+const discoveries: unknown[] = [];
+vi.mock("@/lib/opportunity/queue", () => ({
+  triggerDiscovery: async (input: unknown) => {
+    discoveries.push(input);
+  },
+}));
 
 const { runTurn } = await import("@/lib/agent/turn");
 
@@ -121,6 +131,7 @@ beforeEach(() => {
   chunks = [];
   answers = {};
   remembered = null;
+  discoveries.length = 0;
 });
 
 describe('"Hello, can you hear me?"', () => {
@@ -273,6 +284,9 @@ describe('a mixed message whose product half is missing', () => {
     expect(answer?.text).toMatch(/^A lap infant under two flies free on domestic flights\./);
     expect(answer?.text).toContain("There is still no way of adding a lap infant here today.");
     expect(answer?.escalation).toMatchObject({ offered: true });
+    expect(answer?.noted).toBe(true);
+    // The gap goes to the opportunity pipeline, off this turn.
+    expect(discoveries).toHaveLength(1);
     expect(answer?.sources).toEqual([
       { title: "Traveling with children", url: "http://localhost:4150/help/traveling-with-children" },
     ]);
