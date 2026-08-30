@@ -1,12 +1,21 @@
 /**
  * Resolving a question to one control on the site.
  *
- * The candidates come from three places: controls anywhere in the site graph whose names match
- * the capability, controls the documentation names, and the controls on the page in front of the
- * user. The route to each candidate is computed here, deterministically, and shown to the model.
- * The model chooses the target and writes the answer and the captions. It never counts steps.
+ * A candidate is a control that does what was asked, and there are two ways to be one: the
+ * control's own accessible name accounts for the capability, or a documentation passage that
+ * covers the question names it. The route to each candidate is computed here, deterministically,
+ * and shown to the model. The model chooses the target and writes the answer and the captions.
+ * It never counts steps, and it is never given a control to choose that does something else.
  */
-import { EFFORT, MODELS, controlRefOf, planRoute, sameControl, searchControls } from "@patchlet/shared";
+import {
+  EFFORT,
+  MODELS,
+  controlRefOf,
+  coverageNeeded,
+  planRoute,
+  sameControl,
+  searchControls,
+} from "@patchlet/shared";
 import type { AnswerSource, PageContext, PlannedRoute, SiteControl, SiteGraph, Step } from "@patchlet/shared";
 import { chatJson } from "../openai";
 import type { DocsEvidence } from "./probes";
@@ -42,7 +51,9 @@ function titleOf(graph: SiteGraph, route: string): string {
 
 /**
  * Controls named in the documentation passages. A help article that says "select Change seats"
- * is strong evidence that the control called "Change seats" is the one.
+ * is strong evidence that the control called "Change seats" is the one, even when its name does
+ * not repeat the words of the question: this is the documented purpose of the control, and it is
+ * the only door into the candidates that the control's own name does not have to open.
  */
 function namedInDocs(graph: SiteGraph, docs: DocsEvidence[]): SiteControl[] {
   const text = docs.map((entry) => `${entry.heading ?? ""} ${entry.snippet}`).join("\n").toLowerCase();
@@ -56,32 +67,73 @@ function namedInDocs(graph: SiteGraph, docs: DocsEvidence[]): SiteControl[] {
   return named;
 }
 
-/** The candidates, each with its route from the current page, best first. */
-export function candidatesFor(graph: SiteGraph, feature: string, page: PageContext, docs: DocsEvidence[]): Candidate[] {
+/**
+ * The candidates, each with its route from the current page, best first.
+ *
+ * A candidate is a control the user could be routed to, so it has to be a control that does what
+ * was asked: its own accessible name accounts for the capability, or a documentation passage that
+ * covers the question names it. A seat button is not a way of finding seats together, and neither
+ * is any other control that happens to share one word with the question; without this rule the
+ * model was handed a page of them and asked to choose.
+ */
+export function candidatesFor(
+  graph: SiteGraph,
+  feature: string,
+  page: PageContext,
+  docs: DocsEvidence[],
+  docsHit = false,
+): Candidate[] {
   const current = currentPageOf(page);
   const scored = new Map<string, { control: SiteControl; score: number }>();
   const keyOf = (control: SiteControl) => `${control.route}\n${control.key}`;
+  const needed = coverageNeeded(feature);
 
   for (const match of searchControls(graph, feature, MAX_CANDIDATES)) {
+    if (match.coverage < needed) continue;
     scored.set(keyOf(match.control), { control: match.control, score: match.score });
   }
-  for (const control of namedInDocs(graph, docs)) {
-    const existing = scored.get(keyOf(control));
-    scored.set(keyOf(control), { control, score: Math.max(existing?.score ?? 0, 0.5) + 0.3 });
+  if (docsHit) {
+    for (const control of namedInDocs(graph, docs)) {
+      const existing = scored.get(keyOf(control));
+      scored.set(keyOf(control), { control, score: Math.max(existing?.score ?? 0, 0.5) + 0.3 });
+    }
   }
 
-  const candidates: Candidate[] = [...scored.values()]
-    .sort((a, b) => b.score - a.score)
+  // The same control sits on many pages: a help link in the footer of every article is one
+  // candidate, not eight. One entry per identity, and the copy kept is the one the user can
+  // actually be walked to, or the model is handed a list with no reachable target in it.
+  const nearest = new Map<string, { control: SiteControl; score: number; route: PlannedRoute | null }>();
+  for (const entry of scored.values()) {
+    const route = planRoute(graph, current, { route: entry.control.route, key: entry.control.key });
+    const held = nearest.get(entry.control.key);
+    if (!held || nearer({ ...entry, route }, held)) nearest.set(entry.control.key, { ...entry, route });
+  }
+
+  return [...nearest.values()]
+    .sort((a, b) => stepsOf(a.route) - stepsOf(b.route) || b.score - a.score)
     .slice(0, MAX_CANDIDATES)
     .map((entry, index) => ({
       id: `c${index + 1}`,
       control: entry.control,
       pageTitle: titleOf(graph, entry.control.route),
       score: entry.score,
-      route: planRoute(graph, current, { route: entry.control.route, key: entry.control.key }),
+      route: entry.route,
       destination: destinationOf(graph, entry.control),
     }));
-  return candidates;
+}
+
+/** How far a candidate is, with an unreachable one last. */
+function stepsOf(route: PlannedRoute | null): number {
+  return route ? route.steps.length : Number.MAX_SAFE_INTEGER;
+}
+
+/** Whether one copy of a control is the better one to offer: nearer first, then better matched. */
+function nearer(
+  candidate: { score: number; route: PlannedRoute | null },
+  held: { score: number; route: PlannedRoute | null },
+): boolean {
+  const distance = stepsOf(candidate.route) - stepsOf(held.route);
+  return distance === 0 ? candidate.score > held.score : distance < 0;
 }
 
 function describeCandidate(candidate: Candidate): string {
@@ -152,6 +204,15 @@ export async function resolveTarget(input: {
 }): Promise<Resolution> {
   const started = Date.now();
   const memory = input.memory.length ? `\n\nWhat we know about this visitor:\n${input.memory.map((fact) => `- ${fact}`).join("\n")}` : "";
+  // A passage the documentation check rejected grounds nothing. Showing it anyway had the model
+  // citing the article the check had just read and turned down.
+  const passages = input.docsHit
+    ? input.docs.slice(0, 2).map((entry) => ({
+        article: entry.documentTitle,
+        heading: entry.heading,
+        passage: entry.snippet.slice(0, 200),
+      }))
+    : [];
   const result = await chatJson<{ target: string; answer: string; captions: string[] }>(
     MODELS.plan,
     [
@@ -161,7 +222,7 @@ export async function resolveTarget(input: {
         content: [
           `Question: ${input.question}`,
           `Capability: ${input.feature}${memory}`,
-          `Documentation:\n${input.docs.length ? JSON.stringify(input.docs.slice(0, 2).map((entry) => ({ article: entry.documentTitle, heading: entry.heading, passage: entry.snippet.slice(0, 200) }))) : "none"}`,
+          `Documentation:\n${passages.length ? JSON.stringify(passages) : "none"}`,
           `Candidates:\n${input.candidates.map(describeCandidate).join("\n") || "none"}`,
         ].join("\n\n"),
       },

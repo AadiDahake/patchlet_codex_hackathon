@@ -161,7 +161,14 @@ export function planRoute(
 export type ControlMatch = {
   control: SiteControl;
   page: { route: string; title: string };
+  /** Ranking score: the name, with the page title able to lift it above a namesake elsewhere. */
   score: number;
+  /**
+   * How much of the capability the control's own accessible name accounts for, 0 to 1. This is
+   * what decides whether the control is the thing asked for; the page title never counts towards
+   * it, or a nav link on an article about seats would be a way of choosing one.
+   */
+  coverage: number;
 };
 
 /** Words that name a control without saying what it does. */
@@ -175,8 +182,12 @@ function documentationLink(control: SiteControl): boolean {
 }
 
 /**
- * The controls anywhere on the site whose name says what the question asks for, best first. The
- * page title counts for a little, so "Seats" on the Manage Trip page outranks "Seats" in a footer.
+ * The controls anywhere on the site whose name says what the question asks for, best first.
+ *
+ * Two numbers come back for each: `coverage`, how much of the capability the control's own name
+ * accounts for, and `score`, the rank. The page title only ever moves the rank, so "Seats" on the
+ * Manage Trip page outranks "Seats" in a footer, while "Find a flight" on an article titled "How
+ * do I change my seat?" is still a link to the flight search and covers nothing.
  */
 export function searchControls(graph: SiteGraph, feature: string, limit = 12, minScore = 0): ControlMatch[] {
   const wanted = concepts(feature);
@@ -186,22 +197,28 @@ export function searchControls(graph: SiteGraph, feature: string, limit = 12, mi
   for (const control of graph.controls) {
     const name = control.name.trim();
     if (!name || GENERIC.has(name.toLowerCase())) continue;
-    // The control's own name has to carry at least one concept; the page title then adds the
-    // rest, so "Seats" on the Manage Trip page can match "trip seats" but a nav link on an
-    // article page never matches the article.
+    // The control's own name has to carry at least one concept, and it alone decides coverage.
     const own = keywordScore(feature, name);
     if (own <= 0) continue;
     const withPage = keywordScore(feature, `${name} ${titles.get(control.route) ?? ""}`);
     let score = Math.max(own, withPage * 0.8);
-    if (documentationLink(control)) score *= 0.6;
+    // A link into the documentation is about the capability; it is not the capability.
+    let coverage = own;
+    if (documentationLink(control)) {
+      score *= 0.6;
+      coverage *= 0.6;
+    }
     if (score <= 0 || score < minScore) continue;
-    matches.push({ control, page: { route: control.route, title: titles.get(control.route) ?? "" }, score });
+    matches.push({ control, page: { route: control.route, title: titles.get(control.route) ?? "" }, score, coverage });
   }
   // The same control sits on many pages (a footer link, a nav item); one entry per identity is
   // enough for a search, and the planner picks the page it is nearest on.
   const seen = new Set<string>();
   return matches
-    .sort((a, b) => b.score - a.score || a.control.name.length - b.control.name.length)
+    .sort(
+      (a, b) =>
+        b.coverage - a.coverage || b.score - a.score || a.control.name.length - b.control.name.length,
+    )
     .filter((match) => {
       if (seen.has(match.control.key)) return false;
       seen.add(match.control.key);

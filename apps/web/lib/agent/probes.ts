@@ -4,7 +4,15 @@
  * Absence is only asserted when all three come back empty, so each one is kept
  * cheap, independent, and honest about what it actually saw.
  */
-import { DEFAULT_THRESHOLDS, EFFORT, MODELS, concepts, graphSize, searchControls } from "@patchlet/shared";
+import {
+  DEFAULT_THRESHOLDS,
+  EFFORT,
+  MODELS,
+  concepts,
+  coverageNeeded,
+  graphSize,
+  searchControls,
+} from "@patchlet/shared";
 import type { Affordance, PageContext, ProbeResult, SiteGraph } from "@patchlet/shared";
 import { chatJson, embed } from "../openai";
 import { serviceClient } from "../supabase";
@@ -227,9 +235,7 @@ export function probeInterface(question: string, page: PageContext, feature = ""
     })
     .sort((a, b) => b.score - a.score);
   const best = scored[0]?.score ?? 0;
-  // A two-word capability needs both words on the control; longer ones need most of them.
-  const needed = featureTokens.size <= 2 ? 1 : 0.75;
-  const hit = best >= needed;
+  const hit = best >= coverageNeeded(feature || question);
   return {
     probe: "interface",
     hit,
@@ -283,13 +289,18 @@ async function repositoryMatches(
     treeCache.set(repoFullName, { at: Date.now(), paths });
   }
 
+  // The same rule as a control's name: a path covers the capability or it is not evidence of it.
+  // Every seat question matches `app/trips/[code]/seats/page.tsx` on one word, and six such paths
+  // were enough to make "finding seats together" look like something the product already does.
   const wanted = [...concepts(expand(question))];
+  if (wanted.length === 0) return [];
+  const needed = coverageNeeded(question);
   return paths
     .map((path) => ({
       path,
       score: wanted.filter((token) => path.toLowerCase().includes(token)).length,
     }))
-    .filter((entry) => entry.score > 0)
+    .filter((entry) => entry.score / wanted.length >= needed)
     .sort((a, b) => b.score - a.score)
     .slice(0, 6)
     .map((entry) => ({ path: entry.path, matches: entry.score }));
@@ -303,6 +314,8 @@ export type CapabilityMatch = {
   route: string;
   pageTitle: string;
   score: number;
+  /** How much of the capability this control's own name accounts for, 0 to 1. */
+  coverage: number;
 };
 
 /** What the capabilities check looked through and what it found. */
@@ -337,13 +350,14 @@ export async function probeCapabilities(
     route: match.control.route,
     pageTitle: match.page.title,
     score: Number(match.score.toFixed(2)),
+    coverage: Number(match.coverage.toFixed(2)),
   }));
-  const best = matches[0]?.score ?? 0;
-  // The same rule as the interface check: a two-word capability needs both words on the control,
-  // longer ones need most of them. One shared word ("seat") is not a control for "seats together".
-  const featureSize = concepts(feature).size;
-  const needed = Math.max(threshold, featureSize <= 2 ? 1 : 0.75);
-  const graphHit = best >= needed;
+  // The same rule as the interface check, on the control's own name and never on the title of the
+  // page it sits on. One shared word ("seat") is not a control for "seats together", however high
+  // the page title ranks it.
+  const needed = Math.max(threshold, coverageNeeded(feature));
+  const covering = matches.find((match) => match.coverage >= needed) ?? null;
+  const graphHit = covering !== null;
 
   const repository: CapabilityEvidence["repository"] = { connected: repoFullName !== null, files: [] };
   if (repoFullName) {
@@ -356,8 +370,8 @@ export async function probeCapabilities(
   const repositoryHit = repository.files.length > 0;
 
   const searched = `searched ${size.pages} ${size.pages === 1 ? "page" : "pages"} and ${size.controls} controls`;
-  const summary = graphHit
-    ? `The product has a control for this: "${matches[0]!.name}" on ${matches[0]!.pageTitle || matches[0]!.route} (${searched}).`
+  const summary = covering
+    ? `The product has a control for this: "${covering.name}" on ${covering.pageTitle || covering.route} (${searched}).`
     : repositoryHit
       ? `No control for this on the site (${searched}), but the repository has code that mentions it (${repository.files.length} file(s)).`
       : repository.error
@@ -370,8 +384,9 @@ export async function probeCapabilities(
   return {
     probe: "repository",
     hit: graphHit || repositoryHit,
-    // Only a control the user can be walked to is a score; code alone stays a hedge.
-    score: size.controls === 0 ? null : best,
+    // Only a control the user can be walked to is a score, and only its coverage is that score.
+    // Code alone, and a control that does not cover the capability, both stay a hedge.
+    score: covering ? covering.coverage : null,
     summary,
     evidence,
     latencyMs: Date.now() - started,

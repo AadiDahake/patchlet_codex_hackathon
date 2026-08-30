@@ -39,8 +39,9 @@ export function routeProbes(
 
   if (hit("docs", docsThreshold) || hit("interface", interfaceThreshold)) return "answer";
 
-  // The capabilities check scores a control found elsewhere on the site, which the user can be
-  // walked to. Code alone carries no score, so it stays a hedge.
+  // The capabilities check scores the control it found on the site, which the user can be walked
+  // to. It scores nothing when what it found was code alone, or a control whose name does not
+  // cover the capability, so neither of those can be read here as a control to route to.
   const repository = found("repository");
   if (repository?.hit && repository.score !== null && repository.score >= interfaceThreshold) return "answer";
   if (repository?.hit) return "hedge";
