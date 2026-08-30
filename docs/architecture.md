@@ -190,15 +190,35 @@ policies; the application only ever connects with the service role, which bypass
 
 ## Design system
 
-The dashboard and the widget share one visual language: liquid glass, minimal, clean.
+The dashboard and the widget share one visual language: warm paper, one moss accent, serif
+headlines, and glass where a panel sits over the soft gradient behind the page.
 
-- Backdrop: a very light warm gradient. Panels are translucent white with a blur, one hairline
-  border, 16 px radius, and generous spacing. No decorative gradients inside a panel.
-- Type: Inter. Body 14 to 16 px, headings 24 to 32 px at weight 500.
-- One accent, `#FA500F`, used for the primary action and the spotlight ring and nothing else.
-- Status is text, not a coloured pill.
-- Motion only where it carries information, and it honours `prefers-reduced-motion`.
+- Backdrop: warm paper (`--paper`) with three very soft washes on a fixed layer behind the page
+  (`--wash-green`, `--wash-moss`, `--wash-warm`). They are what the glass blurs.
+- Glass: every frosted surface is the same recipe. A translucent paper fill (`--glass`, or
+  `--glass-strong` for bars and menus), a 30 px backdrop blur (`--blur`), one hairline border
+  (`--hairline`) and a light inner edge (`--glass-highlight`). The console bar, the panels, the
+  cards, the sign-in card and the menus use it. On the landing page the frost is only where a
+  panel overlaps something: the sticky header and the captions over the product captures. When
+  a browser has no `backdrop-filter`, the same surfaces fall back to opaque paper.
+- Type: Inter for body text, Newsreader for console headings, Fraunces for the landing page.
+  Body text is 14 px or larger; captions and labels are 12 px or larger.
+- One accent, `--accent` (`#2e6f54`) with `--accent-deep` for filled pills and deep panels. It
+  is the primary action, the one italic word in a headline, and the spotlight ring. Nothing else
+  is green.
+- Status is text. A badge is a word on a soft tint, never a coloured pill without a word.
+- The landing page shows the product: a real capture of the widget on a host page and a real
+  capture of the console trace, with plain headings and few decorations. Step cards come into
+  view as the page scrolls (`.reveal`), and stay visible without script.
+- Motion only where it carries information, and everything honours `prefers-reduced-motion`.
 
-It has to read on a projector, so nothing smaller than 14 px and real contrast throughout. The
-tokens and utility classes live in `apps/web/app/globals.css`; the widget carries its own copy in
-its shadow root so it can never inherit or leak host styles.
+Every colour, radius, shadow and blur is a token in the `:root` block at the top of
+`apps/web/app/globals.css`; no component names a literal colour. A new page inherits the skin by
+using the classes there (`.panel`, `.glass`, `.record-card`, `.primary-action` and so on) rather
+than styling itself. The widget carries its own copy of the tokens (`--pl-*` in
+`packages/widget/src/styles.ts`) inside its shadow root, so it can never inherit or leak host
+styles; its panel and caption bubble are the same warm glass, and the ring is the accent.
+
+It has to read on a projector, so contrast is measured on the rendered pixels rather than
+assumed: the pull request that introduced the skin records the WCAG ratios for body text on
+every surface.
