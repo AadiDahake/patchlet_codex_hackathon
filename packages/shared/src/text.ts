@@ -29,14 +29,22 @@ const CONCEPT_OF: ReadonlyMap<string, string> = new Map(
   ),
 );
 
-/** Strips the few suffixes that matter for short interface labels. Not a real stemmer. */
+/**
+ * Strips the few suffixes that matter for short interface labels. Not a real stemmer.
+ *
+ * A base form ending in "e" loses it too, so "change", "changes", "changed" and "changing" all
+ * meet at "chang". Without that last rule the inflected forms agreed with each other but never
+ * with the plain verb a control is named by.
+ */
 export function stem(word: string): string {
-  if (word.length > 4 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
-  if (word.length > 4 && word.endsWith("ing")) return word.slice(0, -3);
-  if (word.length > 4 && word.endsWith("ed")) return word.slice(0, -2);
-  if (word.length > 3 && word.endsWith("es")) return word.slice(0, -2);
-  if (word.length > 3 && word.endsWith("s")) return word.slice(0, -1);
-  return word;
+  let base = word;
+  if (base.length > 4 && base.endsWith("ies")) return `${base.slice(0, -3)}y`;
+  if (base.length > 4 && base.endsWith("ing")) base = base.slice(0, -3);
+  else if (base.length > 4 && base.endsWith("ed")) base = base.slice(0, -2);
+  else if (base.length > 3 && base.endsWith("es")) base = base.slice(0, -2);
+  else if (base.length > 3 && base.endsWith("s")) base = base.slice(0, -1);
+  if (base.length > 4 && base.endsWith("e")) base = base.slice(0, -1);
+  return base;
 }
 
 /** Lowercases, splits on anything that is not a letter or digit, drops stopwords, stems. */

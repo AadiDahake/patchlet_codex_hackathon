@@ -57,3 +57,37 @@ describe("validatePlan", () => {
     expect(validatePlan([step()], [])).toBeNull();
   });
 });
+
+describe("validatePlan with steps on later pages", () => {
+  const later = (over: Partial<Step> = {}): Step => ({
+    target: null,
+    caption: "Open Change seats",
+    advanceOn: "navigation",
+    control: { role: "link", name: "Change seats", landmark: "main", href: "/trips/:id/seats", route: "/trips/:id" },
+    ...over,
+  });
+
+  it("accepts a later-page step that names its control, and keeps the control on it", () => {
+    const plan = validatePlan([step(), later()], affordances);
+    expect(plan).toHaveLength(2);
+    expect(plan?.[1]?.target).toBeNull();
+    expect(plan?.[1]?.control?.route).toBe("/trips/:id");
+  });
+
+  it("rejects a later-page step with no control identity", () => {
+    expect(validatePlan([step(), later({ control: undefined })], affordances)).toBeNull();
+    expect(
+      validatePlan([step(), later({ control: { role: "link", name: "", route: "/x" } })], affordances),
+    ).toBeNull();
+  });
+
+  it("insists the first step has a live id, because it is what the spotlight draws now", () => {
+    expect(validatePlan([later(), step()], affordances)).toBeNull();
+  });
+
+  it("allows a longer route when told to", () => {
+    const route = [step(), ...Array.from({ length: 6 }, () => later())];
+    expect(validatePlan(route, affordances)).toBeNull();
+    expect(validatePlan(route, affordances, 8)).toHaveLength(7);
+  });
+});

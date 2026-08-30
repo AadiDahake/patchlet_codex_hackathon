@@ -13,10 +13,22 @@ export type Affordance = {
 
 export type PageContext = { url: string; title: string; affordances: Affordance[] };
 
+/**
+ * One instruction in a walk. `target` is the live affordance id on the page the widget scanned;
+ * it is null for a step on a later page, which the widget binds by `control` once it gets there.
+ */
 export type Step = {
-  target: string;
+  target: string | null;
   caption: string;
   advanceOn: "click" | "input" | "navigation" | "manual";
+  /** The control's stable identity and the route it lives on, from the site graph. */
+  control?: {
+    role: string;
+    name: string;
+    landmark?: string;
+    href?: string;
+    route: string;
+  };
 };
 
 export type ProbeName = "docs" | "interface" | "repository";
@@ -124,6 +136,19 @@ export type EscalationOffer =
   | { offered: true; request: FeatureRequest }
   | { offered: false; reason?: "no_repository" };
 
+/** How a step plan was made: read off the site graph, replayed from a known route, or planned over the current page alone. */
+export type PlanSource = "graph" | "cached" | "page";
+
+export type PlanSummary = {
+  source: PlanSource;
+  total: number;
+  /** The page the walk ends on, when the graph knows it. */
+  destination?: { route: string; title: string };
+};
+
+/** A help article the answer cites. */
+export type AnswerSource = { title: string; url: string | null };
+
 /** `/api/chat` server-sent events, in order of emission. */
 export type ChatEvent =
   | { type: "conversation"; conversationId: string; messageId: string }
@@ -144,6 +169,12 @@ export type ChatEvent =
       escalation: EscalationOffer;
       /** The gap was recorded for the developers without the user having to ask. */
       noted?: boolean;
+      /** Where the steps came from and how many there are, fixed for the whole walk. */
+      plan?: PlanSummary;
+      /** The documentation the answer rests on. */
+      sources?: AnswerSource[];
+      /** A continuation had to change the route, so the count the user saw is no longer true. */
+      routeChanged?: boolean;
     }
   | { type: "error"; message: string };
 

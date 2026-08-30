@@ -37,9 +37,14 @@ export type ModelId = (typeof MODELS)[keyof typeof MODELS];
  */
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export const EFFORT: Record<"understand" | "plan" | "answer" | "verdict" | "ocr", ReasoningEffort> = {
+export const EFFORT: Record<"understand" | "plan" | "resolve" | "answer" | "verdict" | "ocr", ReasoningEffort> = {
   understand: "low",
   plan: "low",
+  /**
+   * Choosing one control from a short list and writing three short sentences, while the user
+   * waits. The fast model accepts `none` but not `minimal`.
+   */
+  resolve: "none",
   answer: "medium",
   verdict: "high",
   ocr: "low",
