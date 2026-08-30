@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 
 const [mode, outDir, ...rest] = process.argv.slice(2);
 if (!mode || !outDir) {
-  console.error("usage: node shots.mjs pages|widget <out-dir> ...");
+  console.error("usage: node scripts/screenshots.mjs pages|widget <out-dir> ...");
   process.exit(1);
 }
 mkdirSync(outDir, { recursive: true });
