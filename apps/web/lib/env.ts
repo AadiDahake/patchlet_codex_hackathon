@@ -79,7 +79,7 @@ export function forgeStrategy(): ForgeStrategyName {
 export const reflexApiKey = (): string => required("REFLEX_API_KEY");
 
 /** The Reflex organization every call is scoped to: an `org_...` id or the organization slug. */
-export const reflexOrganizationId = (): string => optional("REFLEX_ORGANIZATION_ID", "doing_something");
+export const reflexOrganizationId = (): string => optional("REFLEX_ORG", "doing_something");
 
 /** The Reflex API base. */
 export const reflexApiUrl = (): string => optional("REFLEX_API_URL", "https://reflex.runloop.ai/api");
@@ -91,9 +91,9 @@ export function reflexPersonaIds(): {
   capability_verifier: string;
 } {
   return {
-    capability_builder: required("REFLEX_PERSONA_CAPABILITY_BUILDER"),
-    ux_builder: required("REFLEX_PERSONA_UX_BUILDER"),
-    capability_verifier: required("REFLEX_PERSONA_CAPABILITY_VERIFIER"),
+    capability_builder: required("REFLEX_PERSONA_BUILDER"),
+    ux_builder: required("REFLEX_PERSONA_UX"),
+    capability_verifier: required("REFLEX_PERSONA_VERIFIER"),
   };
 }
 
