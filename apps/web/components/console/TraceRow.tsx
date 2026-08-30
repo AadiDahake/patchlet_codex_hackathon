@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { TraceEvent } from "@patchlet/shared";
 import { formatClock } from "@/lib/console/format";
 import { ApprovalCard } from "./ApprovalCard";
@@ -42,9 +43,11 @@ export function TraceRow({
           : event.kind === "artifact"
             ? "is-artifact"
             : "";
+  // The sandbox lane reads apart from the chat lane, so the two stories stay distinct.
+  const lane = event.source === "forge" ? "is-forge" : "";
 
   return (
-    <article className={`trace-row ${tone}`.trim()}>
+    <article className={`trace-row ${tone} ${lane}`.trim()}>
       <div className="trace-row__head">
         <span className="trace-row__kind">{artifact ?? event.kind}</span>
         <h3 className="trace-row__title">{event.title}</h3>
@@ -77,6 +80,9 @@ function Body({
   if (kind === "probe") return <ProbeBody detail={detail} />;
   if (kind === "verdict") return <VerdictBody detail={detail} />;
   if (kind === "model") return <ModelBody detail={detail} />;
+  if (kind === "capability") return <CapabilityBody detail={detail} />;
+  if (kind === "candidate") return <CandidateBody detail={detail} />;
+  if (kind === "preview") return <PreviewBody detail={detail} />;
   if (kind === "tool") return <KeyValues detail={detail} keys={["tool", "transport", "args_summary", "result_summary"]} />;
   if (kind === "pause") {
     return (
@@ -93,8 +99,203 @@ function Body({
     if (artifact === "pr") return <LinkBody detail={detail} label="Open pull request" showBranch />;
     if (artifact === "diff") return <DiffBody detail={detail} />;
     if (artifact === "deployment") return <LinkBody detail={detail} label="Open the deployment" />;
+    if (artifact === "capability_spec") return <SpecBody detail={detail} />;
+    if (artifact === "file_change") return <FilesBody detail={detail} />;
+    if (artifact === "replays") return <KeyValues detail={detail} keys={["linked", "checked", "failed"]} />;
+    if (artifact === "outcome") {
+      return (
+        <KeyValues
+          detail={detail}
+          keys={["source", "eligible", "used", "succeeded", "median_actions_before", "median_actions_after", "support_change_pct"]}
+        />
+      );
+    }
   }
   return <Fallback detail={detail} />;
+}
+
+const STAGE_LABEL: Record<string, string> = {
+  workflows: "1 user workflows",
+  intent: "2 inferred intent",
+  capability: "3 semantic capability",
+  verification: "4 verified implementation",
+};
+
+/** The keys of a compiler event worth a line each. Arrays are joined; objects are counted. */
+const CAPABILITY_KEYS = [
+  "sessions",
+  "steps",
+  "goals",
+  "kept",
+  "successful",
+  "signature",
+  "granularity_rationale",
+  "rejected_too_low",
+  "rejected_too_high",
+  "coverage",
+  "session_count",
+  "median_manual_actions",
+  "constraints",
+  "actions",
+  "scenarios",
+  "reasons",
+  "errors",
+];
+
+function brief(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  if (Array.isArray(value)) {
+    return value.map((item) => (typeof item === "object" && item !== null ? JSON.stringify(item) : String(item))).join(", ") || "-";
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.every(([, v]) => typeof v === "number")) return entries.map(([k, v]) => `${k}: ${String(v)}`).join(", ");
+    return `${entries.length} entries`;
+  }
+  return String(value);
+}
+
+/**
+ * One line of the compiler's decision trail. `detail` is the CompilerEvent itself: its stage
+ * names which of the four story stages the row belongs to, and its own detail carries the
+ * evidence for that step.
+ */
+function CapabilityBody({ detail }: { detail: Detail }) {
+  const stage = str(detail.stage);
+  const inner = asDetail(detail.detail);
+  const rows = CAPABILITY_KEYS.map((key) => [key, inner[key]] as const).filter(
+    ([, value]) => value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0),
+  );
+  return (
+    <>
+      {stage ? <span className="trace-stage">{STAGE_LABEL[stage] ?? stage}</span> : null}
+      {rows.length > 0 ? (
+        <dl className="trace-kv">
+          {rows.slice(0, 6).map(([key, value]) => (
+            <div key={key}>
+              <dt>{key.replace(/_/g, " ")}</dt>
+              <dd>{brief(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </>
+  );
+}
+
+/** A candidate sandbox: which one, where it runs, and its score once the verifier reported. */
+function CandidateBody({ detail }: { detail: Detail }) {
+  const passed = num(detail.scenarios_passed);
+  const total = num(detail.scenarios_total);
+  const failing = Array.isArray(detail.failing) ? detail.failing.map(String) : [];
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3">
+        {str(detail.candidate) ? <span className="outcome-badge is-muted">candidate {str(detail.candidate)}</span> : null}
+        {str(detail.strategy) ? <span className="trace-row__aside is-plain">{str(detail.strategy)} sandbox</span> : null}
+        {passed !== null && total !== null ? (
+          <>
+            <span className="trace-score">
+              {passed}/{total} scenarios
+            </span>
+            <span className="trace-meter">
+              <span className="trace-meter__fill" style={{ width: `${total > 0 ? Math.round((passed / total) * 100) : 0}%` }} />
+            </span>
+          </>
+        ) : null}
+        {num(detail.files_changed) !== null ? <span className="trace-row__aside">{num(detail.files_changed)} files changed</span> : null}
+      </div>
+      {failing.length > 0 ? (
+        <ul className="trace-files">
+          {failing.slice(0, 6).map((id) => (
+            <li key={id}>
+              <code>{id}</code>
+              <span>did not pass</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
+}
+
+/** A live sandbox preview. The URL is announced only after it answered a health check. */
+function PreviewBody({ detail }: { detail: Detail }) {
+  const url = str(detail.url);
+  return (
+    <>
+      {str(detail.candidate) ? <p className="trace-row__text">Candidate {str(detail.candidate)}, port {num(detail.port) ?? "-"}</p> : null}
+      <div className="trace-links">
+        {url ? (
+          <a className="trace-link" href={url} target="_blank" rel="noreferrer">
+            Open the preview
+            <span aria-hidden>&rarr;</span>
+          </a>
+        ) : (
+          <span className="trace-row__text">Building the preview.</span>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** The compiled specification: a line of what it holds, and the way to the opportunity page. */
+function SpecBody({ detail }: { detail: Detail }) {
+  const opportunity = str(detail.opportunity_id);
+  const actions = Array.isArray(detail.actions) ? detail.actions.map(String) : [];
+  return (
+    <>
+      {str(detail.summary) ? <p className="trace-row__text">{str(detail.summary)}</p> : null}
+      <dl className="trace-kv">
+        {num(detail.session_count) !== null ? (
+          <div>
+            <dt>sessions</dt>
+            <dd>{num(detail.session_count)}</dd>
+          </div>
+        ) : null}
+        {num(detail.scenarios) !== null ? (
+          <div>
+            <dt>scenarios</dt>
+            <dd>{num(detail.scenarios)}</dd>
+          </div>
+        ) : null}
+        {actions.length > 0 ? (
+          <div>
+            <dt>actions</dt>
+            <dd>{actions.join(", ")}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {opportunity ? (
+        <div className="trace-links">
+          <Link className="trace-link" href={`/console/opportunities/${opportunity}`}>
+            Open the opportunity
+            <span aria-hidden>&rarr;</span>
+          </Link>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** The files a persona changed, from Codex's own file_change items. */
+function FilesBody({ detail }: { detail: Detail }) {
+  const files = Array.isArray(detail.files) ? detail.files : [];
+  if (files.length === 0) return null;
+  return (
+    <ul className="trace-files">
+      {files.slice(0, 12).map((file, index) => {
+        const row = asDetail(file);
+        return (
+          <li key={index}>
+            <code>{str(row.path) ?? "file"}</code>
+            {str(row.kind) ? <span>{str(row.kind)}</span> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 function ProbeBody({ detail }: { detail: Detail }) {
