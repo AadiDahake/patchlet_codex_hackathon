@@ -24,7 +24,7 @@ create table project (
   site_url text,                           -- where the widget is installed
   repo_full_name text,                     -- 'owner/name', null until one is bound
   repo_default_branch text default 'main',
-  settings jsonb not null default '{}',    -- {docsThreshold:0.70, interfaceThreshold:0.5, voice:"en_paul_neutral"}
+  settings jsonb not null default '{}',    -- {docsThreshold:0.62, interfaceThreshold:0.5, voice:"marin"}
   onboarded_at timestamptz,                -- when the four onboarding steps first all read done
   created_at timestamptz not null default now()
 );
@@ -456,7 +456,8 @@ Also exported:
 - `validatePlan(steps, affordances, maxSteps?)` rejects the whole plan if any live `target` is not
   an affordance id, if a later-page step (`target: null`) does not name its `control`, if the first
   step has no live id, or if any caption exceeds 14 words. Returns `Step[] | null`.
-- `routeProbes(results, thresholds)` returns `"answer" | "hedge" | "absent"`.
+- `routeProbes(results, thresholds)` returns `"answer" | "hedge" | "absent"`. A `repository` hit
+  whose `score` reaches `interfaceThreshold` is a control found on the site and routes to `answer`.
 - `routeOf(url)`, `hrefRoute(href, pageUrl)`, `controlKey(ref)`, `controlRefOf(affordance, pageUrl)`,
   `sameControl(a, b)`, `captionFor(ref)`: the identity of a page and of a control, shared by the
   explorer, the widget and the planner.
@@ -485,6 +486,7 @@ one account can never read another's sources, conversations, escalations or trac
 | `POST /api/site/observe` | `{key, page: PageContext, transition?: {fromUrl, fromTitle, control: {role, name, landmark?, href?}}}` | `{ok: true}`; records the page in the site graph and the move the user made to reach it |
 | `POST /api/site/explore` | - (console) | `{summary: {pages, controls, transitions, reveals, formsTried, visited, skipped, durationMs}}`; explores `project.site_url` with a headless browser, 400 without a site address |
 | `GET /api/site/map` | - (console) | `{graph, routes, siteUrl}`: the site graph with last-seen times and the known routes |
+| `POST /api/documents/import-help` | - (console) | `{documents: Document[], pages}`; imports the help pages the graph knows (or a sitemap) as one document per article |
 | `POST /api/escalate` | `{key, conversationId, messageId, visitorId?}` | `{escalationId, groupId, status}`, or 409 `{error, reason: "no_repository"}` when the project has no repository bound |
 | `GET /api/escalations/:id` | `?key=` required, must be the escalation's project | `{id, status, issueUrl, prUrl, deploymentUrl, request, approval, createdAt}` |
 | `POST /api/transcribe` | multipart `key`, `file` (audio/webm or mp3) | `{text}` |
@@ -559,27 +561,31 @@ Forge rows carry `source: "forge"`; the persona's `tool`, `artifact` and `model`
    `understanding` with them as `memory`.
 4. **Three probes in parallel.** Each emits `probe running`, then `probe done`, and writes a
    `trace_event` with source `agent` and kind `probe`.
-   - **docs**: embed the question, call `match_chunks_with_source` for the top 6. The score is the
-     top similarity, multiplied by `0.6 + 0.4 * confidence` when the chunk carries an OCR
-     confidence. Hit when the score is at least `settings.docsThreshold` (default 0.70) and the
-     passage uses a third of the question's concepts. Evidence is `[{documentTitle, url, heading,
-     snippet, similarity}]`, so the answer can cite the article. With no chunks at all the probe
-     misses and says the knowledge base is empty.
+   - **docs**: embed the question, call `match_chunks_with_source` for the top 6, and rank them by
+     `similarity * (0.6 + 0.4 * overlap)`, where overlap is the share of the question's concepts
+     the passage uses, multiplied by `0.6 + 0.4 * confidence` when the chunk carries an OCR
+     confidence. A score at or above `settings.docsThreshold` (default 0.62) is a hit; below 0.40
+     a miss; in between the best passage is read by `MODELS.understand`, which answers whether the
+     product does what was asked or the passage describes a manual workaround. Evidence is
+     `[{documentTitle, url, heading, snippet, similarity}]`. Both lines are tuned on the offline
+     set in `scripts/eval-docs.ts`.
    - **interface**: pure local matching, no model call. Token overlap between the keywords plus the
      feature and each affordance's name, text, landmark and href, with simple stemming and a small
      synonym list (theme/dark/light/appearance, username/display name/name/profile/account). Score
      0..1 is the best match; hit when it is at least `settings.interfaceThreshold` (default 0.5).
      Evidence is the top 5 affordance ids with their names and scores.
-   - **repository**: GitHub REST with `GITHUB_TOKEN`. `GET /repos/{repo}/git/trees/{branch}?recursive=1`
-     cached 60 s in module scope, filtered to source files (`.ts .tsx .js .jsx .css .md .json`,
-     excluding lockfiles and `node_modules`). Rank paths by keyword, read up to 6 of the best through
-     `GET /repos/{repo}/contents/{path}`, count keyword occurrences. Hit when a path token matches or
-     total occurrences reach 3. Evidence is `[{path, matches}]`. With no repository connected the
-     probe misses and says so.
-5. **Route** with `routeProbes`. A documentation or interface hit gives `answer`. A repository-only
-   hit gives `hedge`. Nothing at all asks `MODELS.verdict` to confirm absence from the three
-   summaries, returning `{exists, confidence, reasoning}`: `exists: false` gives `absent`, otherwise
-   `hedge`. Emit `verdict` and write the trace event.
+   - **repository**, labelled "Known product capabilities": the site graph first, then the
+     repository. `searchControls` over every control the graph knows; a hit when the best control
+     covers the capability (both words of a two-word capability, three quarters of a longer one),
+     and then `score` is that coverage so `routeProbes` can answer. Then GitHub REST with the
+     project's token: `GET /repos/{repo}/git/trees/{branch}?recursive=1` cached 60 s, filtered to
+     source files, ranked by keyword. Evidence is `{graph: {pages, controls, matches}, repository:
+     {connected, files}}`, and the summary always says how many pages and controls were searched,
+     so an absence is grounded in the product and not only in the current page.
+5. **Route** with `routeProbes`. A documentation or interface hit gives `answer`; so does a control
+   found on the site. Code alone gives `hedge`. Nothing at all asks `MODELS.verdict` to confirm
+   absence from the three summaries, returning `{exists, confidence, reasoning}`: `exists: false`
+   gives `absent`, otherwise `hedge`. Emit `verdict` and write the trace event.
 6. **Answer.**
    - `answer` with a graph: `candidatesFor` gathers the controls the graph search, the documentation
      passages and the current page point at, one per identity, and computes the route to each with

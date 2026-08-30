@@ -131,19 +131,24 @@ writes a `trace_event` row so the console can replay the same reasoning live.
    seat", "finding seats together"), which is what the later stages search for.
 3. **Three probes, in parallel.** Each answers "does this exist?" from a different angle.
    - `docs` ("Checking the documentation") embeds the question and searches the project's chunks,
-     and names the article and address of what it found so the answer can cite it. A scanned
-     passage is discounted by how legibly the reader saw it, so a blurry scan cannot outvote clean
-     text.
+     ranking by similarity damped by how many of the question's words the passage uses. A sure
+     hit and a sure miss need no model; the band between them is read by a small model that says
+     whether the passage describes the product doing what was asked or a manual workaround. A
+     scanned passage is discounted by how legibly the reader saw it, so a blurry scan cannot
+     outvote clean text.
    - `interface` ("Looking at this page") is pure local matching of the keywords against the
      affordances the widget scanned off the live page. No model call, so it is fast and
      deterministic.
-   - `repository` ("Checking known product capabilities") ranks the repository's file paths by
-     keyword, reads the best candidates, and counts occurrences. The key stays `repository`; the
-     user-facing label names the capability, because a customer is asking what the product can do,
-     not what is in a source tree.
+   - `repository` ("Checking known product capabilities") searches every control the site graph
+     knows, then ranks the repository's file paths by keyword. Its evidence says how many pages
+     and controls were searched, so an absence is proved against the product and not only against
+     the page in front of the user. The key stays `repository`; the user-facing label names the
+     capability, because a customer is asking what the product can do, not what is in a source
+     tree.
 4. **Route.** `routeProbes` decides without a model where it can: a documentation or interface hit
-   means `answer`, a repository-only hit means `hedge`. When all three come back empty a reasoning
-   model is asked to confirm absence, and only then does the turn become `absent`.
+   means `answer`, and so does a control found anywhere on the site; code alone means `hedge`.
+   When all three come back empty a reasoning model is asked to confirm absence, and only then
+   does the turn become `absent`.
 5. **Answer.** For `answer`, the candidate controls are gathered from the graph search, the
    documentation and the current page, and the route to each is computed over the graph first.
    The model chooses the target, writes the prose and writes the captions; it never counts steps,

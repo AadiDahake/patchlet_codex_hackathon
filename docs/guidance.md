@@ -4,11 +4,6 @@ This document covers the guidance loop: what was observed when it went wrong, th
 replaces it, and the measurements that show the design holds. Observed facts and hypotheses are
 kept apart throughout.
 
-The design ships in two parts. The site graph, the route planner, the widget's fixed count and the
-known routes are in the repository now. The help center import, the tuned documentation check
-and the absence evidence ("searched N pages and M controls") are the second part; sections 2.5,
-2.6 and the documentation measurements in section 3 describe them ahead of that change.
-
 ## 1. What was observed
 
 Setup: NovaAir in development mode with the widget embedded, Patchlet in development mode, one
@@ -163,7 +158,7 @@ dims the rest of the page and shows "Step N of M" with M fixed for the walk. A s
 pointerdown or on the navigation it causes. The geometry rules stand: no empty or off-screen rect
 is ever drawn.
 
-### A real knowledge base (second part)
+### A real knowledge base
 
 "Import help center from the site" reads the help pages the explorer found (or a sitemap), keeps
 the article element only, stores one document per article with its address, and chunks by
@@ -173,7 +168,7 @@ sure hit above 0.62 and a sure miss below 0.40, and in between reads the passage
 model that answers whether the product does what was asked or the passage describes a manual
 workaround. The answer cites the article.
 
-### Absence with evidence (second part)
+### Absence with evidence
 
 The "Known product capabilities" check searches the graph before the repository: its evidence
 says how many pages and controls were searched, and its summary names the control it found. A
@@ -183,8 +178,7 @@ control found elsewhere on the site routes the turn to `answer`; code alone stay
 
 All against NovaAir in development mode on this machine, with Patchlet in development mode, the
 project's graph explored and its help center imported. Numbers come from `npm run e2e:guide`
-(`e2e/guide.spec.ts`), from `trace_event` rows, and from the offline documentation set of the
-second part.
+(`e2e/guide.spec.ts`), from `trace_event` rows, and from `npm run eval:docs`.
 
 ### The walk
 
@@ -195,8 +189,9 @@ second part.
 - Time from pressing Enter to the first spotlight, new route: 4.8 s and 6.2 s over two runs
   (target under 5 s; the second run was before the understanding call was moved beside the
   lookups and the resolution call trimmed, after which the server side of the turn took 3.1 to
-  3.8 s). The turn makes two model calls: understanding, and the resolution that chose the
-  target and wrote the captions.
+  3.8 s). The turn makes two model calls, understanding and the resolution that chose the
+  target and wrote the captions, plus one reading of the documentation passage when its score
+  falls in the band that a number alone cannot decide.
 - Time to the first spotlight, known route (the same question from the Manage Trip page): 943,
   987 and 1103 ms over three runs (target under 1.5 s). Zero model calls; one row lookup and one
   graph read.
@@ -209,7 +204,7 @@ One run over NovaAir: 15 pages, 494 controls, 221 transitions and 58 reveals in 
 booking form was filled from the hint on the page (the demonstration code and the last name) and
 led to the Manage Trip page, which is the edge the three-step route needs.
 
-### The documentation check (second part)
+### The documentation check
 
 The offline set has seven questions the help center answers and five it does not, including
 three wordings of seating a party together. Ranking by similarity alone put the right article
