@@ -54,12 +54,12 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
 
 type Plan = { pattern: RegExp; label: string };
 
-/** The username walkthrough, one entry per control the user has to touch. */
-const USERNAME_PLAN: Plan[] = [
-  { pattern: /aadi dahake|default workspace|account/i, label: 'Open the account menu' },
-  { pattern: /^profile$/i, label: 'Choose Profile' },
-  { pattern: /username/i, label: 'Type the name you want' },
-  { pattern: /update profile/i, label: 'Save with Update profile' },
+/** The seat change walkthrough, one entry per control the user has to touch. */
+const SEAT_PLAN: Plan[] = [
+  { pattern: /^change seats$/i, label: 'Select Change seats' },
+  { pattern: /^move .+, seat \d+[A-F]$/i, label: 'Choose the passenger to move' },
+  { pattern: /^seat \d+[A-F], available$/i, label: 'Pick a free seat on the map' },
+  { pattern: /^confirm seats$/i, label: 'Save with Confirm seats' },
 ];
 
 async function chat(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -80,22 +80,22 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
     response.write(`event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`);
   };
 
-  const wantsUsername = /user\s?name|display name|my name|profile/i.test(question);
-  const wantsDarkMode = /dark mode|dark theme|night mode|appearance|theme/i.test(question);
+  const wantsTogether = /together|family|same row|next to|adjacent|beside/i.test(question);
+  const wantsSeat = !wantsTogether && /seat|move .*passenger/i.test(question);
 
   send({ type: 'conversation', conversationId, messageId: randomUUID() });
   await sleep(between(150, 300));
   send({
     type: 'understanding',
-    feature: wantsDarkMode ? 'dark mode' : wantsUsername ? 'changing the username' : question.slice(0, 40),
-    intent: wantsDarkMode ? 'feature' : 'howto',
-    memory: ['The visitor is the owner of the workspace.'],
+    feature: wantsTogether ? 'automatic family seat selection' : wantsSeat ? 'changing a seat' : question.slice(0, 40),
+    intent: wantsTogether ? 'feature' : 'howto',
+    memory: ['The visitor travels with two children.'],
   });
 
   const probes = [
-    { probe: 'docs', hit: wantsUsername, score: wantsUsername ? 0.82 : 0.31, summary: wantsUsername ? 'The handbook explains how to change your username.' : 'Nothing in the documentation covers this.' },
-    { probe: 'interface', hit: wantsUsername, score: wantsUsername ? 0.74 : 0.12, summary: wantsUsername ? 'The account menu and the profile dialog match.' : 'No control on this page matches.' },
-    { probe: 'repository', hit: false, score: 0.08, summary: 'No source file mentions this.' },
+    { probe: 'docs', hit: wantsSeat, score: wantsSeat ? 0.84 : 0.31, summary: wantsSeat ? 'The help center explains how to change a seat.' : 'The help center only covers changing one seat.' },
+    { probe: 'interface', hit: wantsSeat, score: wantsSeat ? 0.77 : 0.22, summary: wantsSeat ? 'The Seats section and Change seats are on this page.' : 'No control on the seat map groups passengers.' },
+    { probe: 'repository', hit: false, score: 0.11, summary: 'No code path assigns more than one seat.' },
   ];
 
   for (const probe of probes) {
@@ -105,7 +105,7 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
     send({ type: 'probe', probe: probe.probe, status: 'done', result: { ...probe, evidence: [], latencyMs } });
   }
 
-  const outcome = wantsUsername ? 'answer' : wantsDarkMode ? 'absent' : 'hedge';
+  const outcome = wantsSeat ? 'answer' : wantsTogether ? 'absent' : 'hedge';
   send({
     type: 'verdict',
     verdict: {
@@ -115,7 +115,7 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
         outcome === 'absent'
           ? 'The documentation, this page and the repository all came back empty.'
           : 'The documentation and this page both match the question.',
-      feature: wantsDarkMode ? 'dark mode' : 'changing the username',
+      feature: wantsTogether ? 'automatic family seat selection' : 'changing a seat',
     },
   });
   await sleep(between(200, 400));
@@ -123,21 +123,21 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
   if (outcome === 'answer') {
     send({
       type: 'answer',
-      text: 'You can change your username from your profile. I will walk you through it.',
+      text: 'You can change seats under Seats on your Manage Trip page. I will show you.',
       steps: buildSteps(page, continueFrom),
       escalation: { offered: false },
     });
   } else if (outcome === 'absent') {
     send({
       type: 'answer',
-      text: 'Dark mode is not available here today. I can report this to the developers so they can build it. Want me to?',
+      text: 'NovaAir changes one seat at a time, and there is no way to seat a party together automatically. I can report this to the developers so they can build it. Want me to?',
       steps: null,
       escalation: {
         offered: true,
         request: {
-          title: 'Add a dark mode toggle',
-          description: 'People working late want a dark theme. Add a toggle in the header that switches the interface to a dark palette and remembers the choice.',
-          area: 'appearance',
+          title: 'Add automatic family seat selection',
+          description: 'Find a block of adjacent seats for every passenger on the reservation and assign them in one step, with a preview before the change is saved.',
+          area: 'seat map',
           quote: question,
           rationale: 'Asked in support after the documentation, this page and the repository all came back empty.',
         },
@@ -170,14 +170,14 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
  */
 function buildSteps(page: PageContext, continueFrom: number) {
   const steps: Array<{ target: string; caption: string; advanceOn: string }> = [];
-  for (let index = continueFrom; index < USERNAME_PLAN.length; index += 1) {
-    const plan = USERNAME_PLAN[index];
+  for (let index = continueFrom; index < SEAT_PLAN.length; index += 1) {
+    const plan = SEAT_PLAN[index];
     const match = page.affordances.find((affordance) => plan.pattern.test(affordance.name));
     if (!match) break;
     steps.push({
       target: match.id,
       caption: plan.label,
-      advanceOn: /username/i.test(plan.label) || match.role === 'textbox' ? 'input' : 'click',
+      advanceOn: match.role === 'textbox' ? 'input' : 'click',
     });
   }
   return steps.length ? steps : null;
@@ -242,7 +242,7 @@ async function transcribe(request: IncomingMessage, response: ServerResponse): P
   await drain(request);
   await sleep(between(400, 800));
   response.writeHead(200, { ...CORS, 'content-type': 'application/json' });
-  response.end(JSON.stringify({ text: 'How do I change my username?' }));
+  response.end(JSON.stringify({ text: 'Where do I change my seat?' }));
 }
 
 /** A short run of silent MPEG frames, enough for the player to exercise itself. */
