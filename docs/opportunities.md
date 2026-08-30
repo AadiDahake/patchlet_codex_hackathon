@@ -182,6 +182,9 @@ the median interactions, the scenario count, the report count.
 
 The page polls its own route every three seconds while a discovery or a forge run is going and
 every twenty otherwise. Status is text. Nothing on the page is a literal colour.
+`docs/screenshots/opportunities/` holds captures of the list, the evidence, the specification,
+the implementation, the outcome and the group's trace on the Activity page, taken against the
+seeded PostHog project after a real chat turn.
 
 ## The terminal live view
 
