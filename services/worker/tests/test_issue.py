@@ -39,3 +39,21 @@ def test_pr_body_lists_files_and_closes_issue() -> None:
     assert body.startswith("Closes #12")
     assert "`components/ThemeToggle.tsx`" in body
     assert "- Toggle appears in the header." in body
+
+
+def test_pr_body_names_the_request_and_the_report_count() -> None:
+    """A reviewer opening the pull request sees what was asked for and how many people asked."""
+    req = _req().model_copy(update={"report_count": 5, "user_report_count": 2})
+    body = issue.build_pr_body(
+        req, 7,
+        ["lib/seats/together.ts", "app/api/seats/[flightId]/together/route.ts"],
+        ["Three seats together are found."],
+        "Adds automatic family seat selection.",
+        ["tests/no-group-seating.test.ts"],
+    )
+    assert "## The request" in body
+    assert "**Add dark mode**" in body
+    assert "> How do I turn on dark mode?" in body
+    assert "Requested 5 times, 2 by users." in body
+    assert "- `lib/seats/together.ts`" in body
+    assert "- `tests/no-group-seating.test.ts` (deleted)" in body

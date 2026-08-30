@@ -158,10 +158,10 @@ def inspect_repository(req: FeatureRequestInput, issue: IssueRef) -> Plan:
         reporter.model(
             f"Chose {len(plan.files)} file(s) to change",
             llm.ARCHITECT_MODEL,
-            "choose the minimal set of files and write acceptance criteria",
+            "choose the smallest set of files and write acceptance criteria",
             input_summary=input_summary,
             output_summary=plan.summary,
-            files=[{"path": f.path, "reason": f.reason} for f in plan.files],
+            files=[{"path": f.path, "reason": f.reason, "action": f.action} for f in plan.files],
         )
         return plan
     finally:
@@ -193,13 +193,16 @@ def open_draft_pr(req: FeatureRequestInput, issue: IssueRef, plan: Plan, draft: 
     parent = draft.base_sha or github.get_branch_sha(req.default_branch)
     title = req.title[0].lower() + req.title[1:] if req.title else "change"
     message = f"feat: {title}\n\nCloses #{issue.number}"
-    head_sha = github.push_files(branch, parent, draft.files, message)
+    head_sha = github.push_files(branch, parent, draft.files, message, draft.deletions)
+    pushed = f"{len(draft.files)} file(s)" + (f" and removed {len(draft.deletions)}" if draft.deletions else "")
     reporter.tool(
-        f"Pushed {len(draft.files)} file(s) to {branch}", "push_files", "rest",
+        f"Pushed {pushed} to {branch}", "push_files", "rest",
         f"blob/tree/commit/ref on top of {parent[:7]}", f"commit {head_sha[:7]}",
     )
 
-    body = issue_text.build_pr_body(req, issue.number, list(draft.files), plan.acceptance_criteria, draft.summary)
+    body = issue_text.build_pr_body(
+        req, issue.number, list(draft.files), plan.acceptance_criteria, draft.summary, draft.deletions
+    )
     pr_title = f"feat: {title}"
     existing = github.find_open_pr_for_branch(branch)
     if existing:
@@ -215,7 +218,6 @@ def open_draft_pr(req: FeatureRequestInput, issue: IssueRef, plan: Plan, draft: 
         f"head={branch} base={req.default_branch} draft=true", result_summary,
     )
     ref = PrRef(number=int(pr["number"]), url=pr["html_url"], branch=branch, head_sha=head_sha, node_id=pr.get("node_id", ""))
-    trace.pr(req.project_id, req.escalation_id, ref.url, ref.number, branch)
     db.update_escalation(req.escalation_id, pr_url=ref.url, pr_number=ref.number, branch=branch)
     _set_group(req, pr_url=ref.url, status="pr_open")
 
@@ -234,6 +236,9 @@ def open_draft_pr(req: FeatureRequestInput, issue: IssueRef, plan: Plan, draft: 
     slack.notify(f"Patchlet drafted {ref.url} for \"{req.title}\" and it is waiting for approval in the console.")
     _set_status(req, "awaiting_approval")
     _set_group(req, status="awaiting_approval")
+    # The last two rows a reader sees: the pull request itself, then the card that asks them to
+    # decide. Everything this run did to get there is already above them.
+    trace.pr(req.project_id, req.escalation_id, ref.url, ref.number, branch)
     trace.pause(req.project_id, req.escalation_id, PAUSE_LABEL)
     return ref
 
@@ -265,10 +270,22 @@ def merge_and_deploy(req: FeatureRequestInput, issue: IssueRef, pr: PrRef, decis
 
     _set_status(req, "deploying")
     reporter.status(f"Waiting for the Vercel deployment of {merge_sha[:7]}", "running", {"sha": merge_sha})
-    url = deploy.wait_for_deployment(
-        merge_sha,
-        report=lambda title, state: reporter.status(title, "running", {"sha": merge_sha, "readyState": state}),
-    )
+    try:
+        url = deploy.wait_for_deployment(
+            merge_sha,
+            report=lambda title, state: reporter.status(title, "running", {"sha": merge_sha, "readyState": state}),
+        )
+    except deploy.DeploymentTimeout as timeout:
+        # The change is merged and on the production branch; only the watch ran out. Saying that
+        # plainly is honest, and calling the whole run failed would not be.
+        minutes = deploy.TIMEOUT_S // 60
+        reporter.status(
+            f"Stopped watching for the deployment of {merge_sha[:7]} after {minutes} minutes",
+            "failed",
+            {"sha": merge_sha, "project": config.target_vercel_project(), "reason": str(timeout)},
+        )
+        db.update_escalation(req.escalation_id, status="deploying", error=str(timeout)[:2000])
+        return Outcome(status="merged", issue_url=issue.url, pr_url=pr.url, merge_sha=merge_sha, note=str(timeout))
     trace.deployment(req.project_id, req.escalation_id, url)
     db.update_escalation(req.escalation_id, status="shipped", deployment_url=url)
     _set_group(req, status="shipped")

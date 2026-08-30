@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,20 +47,34 @@ def snapshot(root: Path, paths: list[str]) -> dict[str, str | None]:
     return originals
 
 
-def apply_files(root: Path, files: dict[str, str]) -> dict[str, str | None]:
-    """Write every file or none of them. Returns the original contents (None for new files)."""
-    originals = snapshot(root, list(files))
-    written: list[str] = []
+def apply_files(
+    root: Path,
+    files: dict[str, str],
+    deletions: Iterable[str] = (),
+) -> dict[str, str | None]:
+    """Write every file and remove every deletion, or do neither.
+
+    Returns the original contents, `None` for a file that did not exist, which is also what
+    `restore` needs to put a deleted file back.
+    """
+    removals = [rel for rel in deletions if rel not in files]
+    originals = snapshot(root, [*files, *removals])
+    touched: list[str] = []
     try:
+        for rel in removals:
+            target = safe_join(root, rel)
+            if target.exists():
+                target.unlink()
+            touched.append(rel)
         for rel, content in files.items():
             target = safe_join(root, rel)
             target.parent.mkdir(parents=True, exist_ok=True)
             tmp = target.with_name(target.name + ".patchlet-tmp")
             tmp.write_text(content, encoding="utf-8")
             os.replace(tmp, target)
-            written.append(rel)
+            touched.append(rel)
     except Exception:
-        restore(root, {rel: originals[rel] for rel in written})
+        restore(root, {rel: originals[rel] for rel in touched})
         raise
     return originals
 
@@ -74,15 +89,23 @@ def restore(root: Path, originals: dict[str, str | None]) -> None:
             target.write_text(content, encoding="utf-8")
 
 
-def unified_diff(path: str, before: str | None, after: str) -> str:
+def unified_diff(path: str, before: str | None, after: str | None) -> str:
+    """A patch for one file. `after` of None is a deletion, so the new side is /dev/null."""
     old_lines = (before or "").splitlines(keepends=True)
-    new_lines = after.splitlines(keepends=True)
+    new_lines = (after or "").splitlines(keepends=True)
     from_file = "/dev/null" if before is None else f"a/{path}"
-    return "".join(difflib.unified_diff(old_lines, new_lines, fromfile=from_file, tofile=f"b/{path}"))
+    to_file = "/dev/null" if after is None else f"b/{path}"
+    return "".join(difflib.unified_diff(old_lines, new_lines, fromfile=from_file, tofile=to_file))
 
 
-def unified_diffs(originals: dict[str, str | None], files: dict[str, str]) -> list[dict[str, str]]:
-    return [{"path": path, "patch": unified_diff(path, originals.get(path), content)} for path, content in files.items()]
+def unified_diffs(
+    originals: dict[str, str | None],
+    files: dict[str, str],
+    deletions: Iterable[str] = (),
+) -> list[dict[str, str]]:
+    patches = [{"path": path, "patch": unified_diff(path, originals.get(path), content)} for path, content in files.items()]
+    patches += [{"path": path, "patch": unified_diff(path, originals.get(path), None)} for path in deletions]
+    return patches
 
 
 @dataclass

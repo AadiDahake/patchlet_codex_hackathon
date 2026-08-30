@@ -199,6 +199,31 @@ human decision**. The console writes `escalation.approval`; approval merges and 
 deployment until it is live. A `forge` run pauses the same way; on approval the forge runner marks
 the pull request ready, merges it, watches the deployment and tears the winner's sandbox down.
 
+### An approved request outranks the target repository's premise
+
+The architect reads the target repository's own conventions before it plans anything, and a product
+repository can hold a convention, a contract or a test whose whole content is that the requested
+feature is absent. Read as instructions, those forbid the change: asked to build automatic group
+seating in NovaAir, the architect answered with an empty file list and quoted `AGENTS.md` back,
+"raise this rather than implementing it". Nothing shipped, and the trace only said "the architect
+returned no files".
+
+The issue reaching the worker is an approved decision. A human accepted the request in the console
+before the run started, so the premise is what the change supersedes, not a veto over it. So:
+
+- The architect is told the issue is an approved product decision, that it supersedes any premise,
+  guard test or contract whose only content is the feature's absence, and that such a guard is part
+  of the plan rather than a reason to refuse one.
+- A planned file carries an action: `edit`, `create` or `delete`. A test that exists only to assert
+  the feature is missing is planned for deletion, and `steps/applier.py` and `push_files` both carry
+  a deletion through to the commit.
+- The strict plan schema requires at least one file. An answer with none is a refusal rather than a
+  failure, so it is retried once with the refusal named; a second empty answer raises, carrying the
+  model's own words so the trace says why nothing was planned.
+
+Everything else in the conventions still binds. Only the absence claim is superseded, never the
+engineering standard around it.
+
 Neither engine does that work inside an HTTP request. The routes write the `escalation` row and
 answer; a long-lived process polls it and carries the run. For `local` that process is
 `services/worker/local_runner.py`, for `forge` it is `npm run forge:runner`. A forge run takes tens
