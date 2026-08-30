@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from models import Draft, FeatureRequestInput, GateOutcome, Plan
@@ -10,6 +11,8 @@ from steps.reporter import Reporter
 
 MAX_REPAIRS = 3
 MAX_CANDIDATES = 2
+# How much of a file the gate named but the plan does not touch goes into a repair.
+CONTEXT_FILE_CHARS = 9000
 
 
 def _affected_paths(output: str, files: dict[str, str]) -> list[str]:
@@ -17,6 +20,27 @@ def _affected_paths(output: str, files: dict[str, str]) -> list[str]:
     lowered = output.lower()
     affected = [path for path in files if path.lower() in lowered or Path(path).name.lower() in lowered]
     return affected or list(files)
+
+
+NAMED_PATH_RE = re.compile(r"[\w./\[\]-]+\.(?:ts|tsx|js|jsx|mjs|css)")
+
+
+def _witnesses(root: Path, output: str, planned: set[str], limit: int = 2) -> dict[str, str]:
+    """Files the gate named that the plan does not touch, read from the clone.
+
+    A failing test is the clearest case. It says what the code has to satisfy, it is not in the
+    plan, so the editor never sees it, and a stack trace alone does not carry the signature it is
+    being called with. Reading it is what turns a repair into more than a guess.
+    """
+    found: dict[str, str] = {}
+    for match in NAMED_PATH_RE.findall(output):
+        path = match.lstrip("./")
+        if path in planned or path in found or len(found) >= limit:
+            continue
+        body = repo.read_file(root, path)
+        if body:
+            found[path] = body[:CONTEXT_FILE_CHARS]
+    return found
 
 
 def _first_failure(results: list[applier.GateResult]) -> applier.GateResult | None:
@@ -97,8 +121,10 @@ def draft_with_gates(
         while failure is not None and repairs < MAX_REPAIRS:
             repairs += 1
             total_repairs += 1
+            witnesses = _witnesses(root, failure.output, set(files) | set(deletions))
             for path in _affected_paths(failure.output, files):
                 context = {p: c for p, c in files.items() if p != path}
+                context.update(witnesses)
                 files[path] = codegen.repair_file(path, files[path], failure.output, agents_md, context, dependencies)
                 reporter.model(
                     f"Repaired {path} after {failure.name} failed (repair {repairs}/{MAX_REPAIRS}, {label})",
