@@ -59,7 +59,7 @@ document (`runloopai/reflex-os`, re-read on 2026-08-29 after the personas were c
 automation, trigger, schedule, flow or webhook resource among its 173 paths; the one "webhook" in
 it is an event type in the stream enum. So `missing_capability.discovered` is Patchlet's own event,
 `POST /api/opportunities/:groupId/forge` is the automation, and the personas are launched by id.
-If a webhook trigger appears on the API, it replaces that route's call to `startForgeRun` and
+If a webhook trigger appears on the API, it replaces that route's call to `enqueueForgeRun` and
 nothing below it changes.
 
 ### Runloop
@@ -186,14 +186,48 @@ body that would have been opened. `--hold <seconds>` keeps the winner's preview 
 it down; `--keep` leaves it up. `--trace-out <path>` writes every trace row as JSON lines.
 
 From the console: `POST /api/opportunities/:groupId/forge` starts a run for the group's latest
-compiled specification (or the `spec` in the body while none is stored), answers `202` with the
-escalation id, and the run continues after the response. `GET /api/forge/:escalationId` lists the
-candidates; `GET /api/forge/:escalationId/preview` gives the live preview URL or `null`. Approval
-goes through the existing `POST /api/escalations/:id/approve`, which under `forge` merges, watches
-the deployment and tears the winner down after it answers.
+compiled specification (or the `spec` in the body while none is stored) and answers `202` with the
+escalation id. `GET /api/forge/:escalationId` lists the candidates; `GET
+/api/forge/:escalationId/preview` gives the live preview URL or `null`. Approval goes through the
+existing `POST /api/escalations/:id/approve`, which records the decision and answers `202`.
 
-The run continues after the HTTP response through `after()` from `next/server`. On a laptop
-running `next dev` or `next start` that is the whole story. On a hosted deployment the function's
-maximum duration bounds it, so a hosted console starts the run and a long-lived process should
-carry it; the engine takes explicit dependencies (`buildForgeDeps`) so that process can be a
-script, as `forge-local.ts` is.
+## Where a run actually runs
+
+Neither route does the work. A forge run is two sandboxes, six Codex sessions and two test runs,
+which is tens of minutes; carrying a decision out is a merge plus a Vercel deployment watch, which
+`deploy.ts` gives eight minutes. Vercel's hobby plan caps a serverless function at 300 s, and no
+plan holds a function open for a run of that length, so both routes answer as soon as the row
+exists and a long-lived process does the rest:
+
+```bash
+pch-exec npm run forge:runner
+```
+
+This is the shape the `local` engine has always had, where `services/worker/local_runner.py` polls
+the same table. The console and the widget read `trace_event` rows either way, so the live trace,
+the Activity page and the widget's status are unchanged.
+
+The `escalation` row is the queue. `lib/forge/queue.ts` holds both claims and
+`apps/web/scripts/forge-runner.ts` is the loop, which polls every 2 s and carries each claimed row
+on its own promise, so a run waiting on a deployment does not hold up the next one.
+
+| Queue | A row joins it when | The runner claims it by | Then |
+|---|---|---|---|
+| A run to build | `POST /api/opportunities/:groupId/forge` writes `engine='forge'`, `status='queued'` and the `capability_ir` it will build | moving `queued` to `drafting`, conditional on it still being `queued` | `runForge` from step 8, ending on the `pause` for a person |
+| A decision to carry out | `POST /api/escalations/:id/approve` writes `approval` and `status` `approved` or `rejected` | stamping `approval_claimed_at`, conditional on it still being null | `approveForge`: mark ready, squash merge, watch the deployment, tear the winner down |
+
+Each claim is one conditional update, so two runners cannot take the same row.
+
+Two columns arrive with `0015_forge_queue.sql`. `capability_ir` is the specification, copied onto
+the row at enqueue time: it is what makes a forge escalation runnable, because the widget also
+opens `engine='forge'` rows with status `queued` and no specification, and the runner must skip
+those. `approval_claimed_at` is the claim on a decision; the status column cannot carry that one,
+because a rejection's terminal status is `rejected`, which is already the status the console wrote.
+
+Everything that can refuse a run still happens in the route, before a row exists: the strategy's
+keys (`forgeAvailability`) and the target repository's token. What is left is only work.
+
+The runner needs the same environment a run needs: the Supabase service key, the GitHub token, and
+the selected strategy's keys, plus `VERCEL_TOKEN` for the deployment watch. `pch-exec` supplies
+them. Stop it with Ctrl-C; a row it was carrying stays where it got to, and `npm run forge:sweep`
+shuts down any devbox it left behind.

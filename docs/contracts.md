@@ -95,6 +95,8 @@ create table escalation (
   pr_url text, pr_number int, branch text,
   deployment_url text,
   approval jsonb,                          -- {approved, note, decidedAt}
+  approval_claimed_at timestamptz,         -- when the forge runner took the decision, see docs/forge.md
+  capability_ir jsonb,                     -- the CapabilityIr a forge run builds; null makes the row unrunnable
   error text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -397,8 +399,8 @@ one account can never read another's sources, conversations, escalations or trac
 | `GET /api/conversations/:id` | - | `{conversation}`: every message in order with its steps, probes, verdict and feature request, the escalation, and `memory: string[]`, the facts the agent keeps about that visitor |
 | `GET /api/escalations` | - | `{escalations: Escalation[]}`, newest first |
 | `GET /api/requests` | - | `{requests: RequestGroup[]}`, heaviest first: priority, then last reported |
-| `POST /api/escalations/:id/approve` | `{approved: boolean, note?: string}` | `{ok: true, status}`; under `forge` the route then marks the pull request ready, merges it, watches the deployment and tears the winner's sandbox down after it answers |
-| `POST /api/opportunities/:groupId/forge` | `{spec?: CapabilityIr}`; without `spec` the group's latest `capability_spec` row is used | `202 {escalationId, status: "drafting"}`; `409 {error, reason: "no_capability_spec" \| "no_github_token"}`; `503 {error, reason: "engine_unavailable"}` when the selected strategy has no keys; `400 {error, reason: "invalid_spec"}` |
+| `POST /api/escalations/:id/approve` | `{approved: boolean, note?: string}` | `202 {ok: true, status}`; the row is the queue, and under `forge` the runner marks the pull request ready, merges it, watches the deployment and tears the winner's sandbox down |
+| `POST /api/opportunities/:groupId/forge` | `{spec?: CapabilityIr}`; without `spec` the group's latest `capability_spec` row is used | `202 {escalationId, status: "queued"}`; `409 {error, reason: "no_capability_spec" \| "no_github_token"}`; `503 {error, reason: "engine_unavailable"}` when the selected strategy has no keys; `400 {error, reason: "invalid_spec"}` |
 | `GET /api/forge/:escalationId` | - | `{escalation: {id, engine, status, prUrl, prNumber, branch, deploymentUrl, winningCandidateId, capabilitySpecId, approval, error, createdAt, updatedAt}, candidates: Candidate[]}` (the `candidate` row, camel-cased) |
 | `GET /api/forge/:escalationId/preview` | - | `{url: string \| null, candidate: "A" \| "B" \| null}`; the URL is rebuilt from the winner's handle and health-checked on every read, `null` once the sandbox is gone |
 | `GET /api/trace/stream` | `?since=&conversationId=&escalationId=` | SSE; `id:` is the `trace_event.id`, `event: trace`, `data: TraceEvent` |
@@ -415,7 +417,10 @@ strategy. Under a runnable `forge` the row is inserted `queued` and adopted by t
 `POST /api/opportunities/:groupId/forge` for its group.
 
 `POST /api/escalations/:id/approve` writes `approval` on the row and sets the status to `approved`
-or `rejected`. The run is polling that column, so that is the whole channel.
+or `rejected`. The run is polling that column, so that is the whole channel. Neither engine carries
+the decision out inside the request: the `local` worker polls it, and for `forge` the runner does
+(`npm run forge:runner`, "Where a run actually runs" in `docs/forge.md`). Both forge routes stay
+well inside the 300 s a serverless function is allowed.
 
 `GET /api/trace/stream` polls Postgres every 700 ms, honours `Last-Event-ID`, sends a `: ping`
 comment every 15 s, and closes cleanly after 240 s so `EventSource` reconnects.

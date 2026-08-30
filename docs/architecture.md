@@ -167,9 +167,14 @@ same trace events, so the console renders them identically.
 A `local` run files the issue, inspects the repository, drafts the implementation, runs the target
 repository's own typecheck and build as gates, opens a draft pull request, and then **pauses on a
 human decision**. The console writes `escalation.approval`; approval merges and watches the
-deployment until it is live. A `forge` run pauses the same way; on approval the approve route
-itself marks the pull request ready, merges it, watches the deployment and tears the winner's
-sandbox down.
+deployment until it is live. A `forge` run pauses the same way; on approval the forge runner marks
+the pull request ready, merges it, watches the deployment and tears the winner's sandbox down.
+
+Neither engine does that work inside an HTTP request. The routes write the `escalation` row and
+answer; a long-lived process polls it and carries the run. For `local` that process is
+`services/worker/local_runner.py`, for `forge` it is `npm run forge:runner`. A forge run takes tens
+of minutes and a serverless function is capped at 300 s, so the split is what makes the hosted
+console possible at all. See "Where a run actually runs" in `docs/forge.md`.
 
 ## Tracing
 
