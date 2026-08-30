@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -56,10 +58,28 @@ class IssueRef(BaseModel):
     user_request_count: int = 0
 
 
+PlannedAction = Literal["edit", "create", "delete"]
+
+
 class PlannedFile(BaseModel):
+    """One file the architect decided the change touches, and what it does to it.
+
+    `delete` exists because a repository can hold a test or a document whose only content is the
+    claim that the requested feature is absent. Shipping the feature makes that claim false, so the
+    guard is part of the change rather than an obstacle to it.
+    """
+
     path: str
     reason: str
-    is_new: bool = False
+    action: PlannedAction = "edit"
+
+    @property
+    def is_new(self) -> bool:
+        return self.action == "create"
+
+    @property
+    def is_delete(self) -> bool:
+        return self.action == "delete"
 
 
 class Plan(BaseModel):
@@ -84,6 +104,7 @@ class GateOutcome(BaseModel):
 
 class Draft(BaseModel):
     files: dict[str, str]
+    deletions: list[str] = Field(default_factory=list)
     diffs: list[FileDiff] = Field(default_factory=list)
     summary: str = ""
     base_sha: str = ""

@@ -151,11 +151,26 @@ def build_duplicate_comment(req: FeatureRequestInput, count: int | None = None) 
     return body
 
 
-def build_pr_body(req: FeatureRequestInput, issue_number: int, changed: list[str], criteria: list[str], summary: str) -> str:
-    lines = [f"Closes #{issue_number}", "", "## What changed", ""]
+def build_pr_body(
+    req: FeatureRequestInput,
+    issue_number: int,
+    changed: list[str],
+    criteria: list[str],
+    summary: str,
+    deleted: list[str] | None = None,
+) -> str:
+    """The pull request body: what was asked for, how many people asked, and what this touches."""
+    removed = deleted or []
+    lines = [f"Closes #{issue_number}", "", "## The request", ""]
+    lines.append(f"**{req.title.strip()}**")
+    if req.quote.strip():
+        lines += ["", f"> {req.quote.strip()}"]
+    lines += ["", count_line(req.report_count, req.user_report_count) + "."]
+    lines += ["", "## What changed", ""]
     lines.append(summary.strip() or req.description.strip())
     lines += ["", "Files:", ""]
     lines += [f"- `{path}`" for path in changed]
+    lines += [f"- `{path}` (deleted)" for path in removed]
     lines += ["", "## How to test", ""]
     lines += [f"- {item.lstrip('- ').strip()}" for item in criteria] or ["- Run the app and try the feature."]
     lines += ["", "---", "Drafted by Patchlet from a user request. A maintainer reviews and approves before merge."]

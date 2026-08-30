@@ -82,3 +82,26 @@ def test_mark_ready_merge_and_close() -> None:
     responses.patch(f"{API}/pulls/7", json={"state": "closed"})
     client.close_pr(7, "no thanks")
     assert json.loads(responses.calls[-1].request.body) == {"state": "closed"}
+
+
+@responses.activate
+def test_push_files_removes_a_deleted_path_from_the_tree() -> None:
+    """A null blob sha is how the Git data API takes a file out of the tree."""
+    client = GitHubClient("AadiDahake/novaair", token="t")
+    responses.get(f"{API}/git/commits/parent1", json={"tree": {"sha": "tree0"}})
+    responses.post(f"{API}/git/blobs", json={"sha": "blob1"})
+    responses.post(f"{API}/git/trees", json={"sha": "tree1"})
+    responses.post(f"{API}/git/commits", json={"sha": "commit1"})
+    responses.get(f"{API}/git/ref/heads/patchlet/7-seats", status=404, json={"message": "Not Found"})
+    responses.post(f"{API}/git/refs", json={"ref": "refs/heads/patchlet/7-seats"})
+
+    client.push_files(
+        "patchlet/7-seats", "parent1", {"lib/seats/together.ts": "x\n"}, "feat: x",
+        deletions=["tests/no-group-seating.test.ts"],
+    )
+
+    tree_body = json.loads(next(c for c in responses.calls if c.request.url.endswith("/git/trees")).request.body)
+    assert tree_body["tree"] == [
+        {"path": "lib/seats/together.ts", "mode": "100644", "type": "blob", "sha": "blob1"},
+        {"path": "tests/no-group-seating.test.ts", "mode": "100644", "type": "blob", "sha": None},
+    ]

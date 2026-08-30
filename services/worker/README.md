@@ -13,21 +13,38 @@ For one escalation it:
    new user's words instead of filing twice. Otherwise it asks the model to call the GitHub MCP
    `create_issue` tool and executes that call through the remote MCP server, falling back to the
    REST API when MCP fails.
-2. **Inspects the repository.** Shallow clone, reads `AGENTS.md`, ranks the source files by the
-   request's keywords, and asks the architect model (JSON output) for the minimal set of 2 to 5
-   files to change, with a reason each, plus acceptance criteria. New files are planned when needed.
-3. **Drafts the implementation.** One editor call per file (existing contents supplied verbatim,
-   whole-file output). Applies the files in the clone, then runs the gates: `npm ci` (cached
-   `node_modules` under `~/.cache/patchlet/<repo>` keyed by the lockfile hash), `npm run typecheck`,
-   `npm run build`. On failure the gate output goes back to the editor for the affected file (up to
-   3 repairs), then a fresh candidate is drafted (up to 2 candidates).
+2. **Inspects the repository.** Shallow clone, then the architect model reads the bounded file tree,
+   `AGENTS.md`, the dependency list and the twelve most relevant files **in full**, and answers with
+   2 to 7 files, each with a reason and an action (`edit`, `create` or `delete`), plus acceptance
+   criteria. Ranking is by what the path says; body hits only break ties, and a path `AGENTS.md`
+   names in backticks is lifted because it carries the repository's contract.
+3. **Drafts the implementation.** One editor call per written file (existing contents supplied
+   verbatim, whole-file output); a planned deletion needs no model call. Applies the files and the
+   deletions in the clone, then runs the gates: `npm ci` (cached `node_modules` under
+   `~/.cache/patchlet/<repo>` keyed by the lockfile hash), `npm run typecheck`, `npm run build`. On
+   failure the gate output goes back to the editor for the affected file (up to 3 repairs), then a
+   fresh candidate is drafted (up to 2 candidates).
 4. **Opens a draft pull request** on `patchlet/<issue>-<slug>` with one commit
-   (`feat: <title>`, `Closes #<n>`), through MCP `create_pull_request` with a REST fallback, then
-   comments on it with the gate results (`npm run typecheck` and `npm run build`, with durations)
-   and a link to `NEXT_PUBLIC_APP_URL/console/activity`, and pauses for a human decision.
+   (`feat: <title>`, `Closes #<n>`; a deleted path goes into the tree with a null blob sha), through
+   MCP `create_pull_request` with a REST fallback. The body names the request, the user's quote, the
+   count line and every changed and deleted file. It then comments with the gate results and a link
+   to `NEXT_PUBLIC_APP_URL/console/activity`, and pauses for a human decision. The last two trace
+   rows are the pull request and the approve card.
 5. **After approval** marks the PR ready (GraphQL `markPullRequestReadyForReview`), waits for
-   `mergeable`, squash-merges, and polls Vercel until the deployment for the merge commit is
-   `READY`. After a rejection it closes the PR with a comment.
+   `mergeable`, squash-merges, and polls Vercel for the deployment of the merge commit (filtered by
+   `sha`, matched on `meta.githubCommitSha`) until it is `READY`. After 10 minutes it stops with a
+   `status` event rather than hanging: the merge landed, so the run is not marked failed. After a
+   rejection it closes the PR with a comment.
+
+### The architect and the target repository's premise
+
+A product repository can hold a convention, a contract or a test whose whole content is that the
+requested feature is absent. Read as instructions those forbid the change, and the architect used to
+answer with no files at all. The issue reaching the worker is an approved decision, so the premise is
+what the change supersedes. The architect is told that, a guard that only asserts the absence is
+planned for deletion or rewrite, the strict schema requires at least one file, an empty answer is
+retried once with the refusal named, and a second empty answer raises with the model's own words in
+the message. Everything else in the conventions still binds.
 
 When `SLACK_WEBHOOK_URL` is set, one message goes out when the issue is filed and one when the
 draft pull request opens.
@@ -52,11 +69,11 @@ steps/db.py        PostgREST helpers (update_escalation, emit_trace, claim_queue
 steps/trace.py     the trace `detail` shapes the console renders
 steps/github.py    REST + GraphQL client
 steps/mcp_github.py  streamable-HTTP MCP client and the model-driven issue filing
-steps/repo.py      clone, file tree, keyword ranking
+steps/repo.py      clone, file tree, keyword ranking, bounded reads
 steps/codegen.py   architect and editor prompts and model calls
-steps/applier.py   atomic file apply with a path guard, gates, node_modules cache, unified diffs
+steps/applier.py   atomic apply and delete with a path guard, gates, node_modules cache, diffs
 steps/drafting.py  the draft / gate / repair / new-candidate loop
-steps/deploy.py    Vercel deployment polling
+steps/deploy.py    Vercel deployment polling by commit sha, with a clean 10 minute timeout
 steps/issue.py     issue and PR body builders
 steps/slack.py     optional webhook
 tests/             pytest suite and the fixture Next.js app
@@ -114,9 +131,17 @@ first run installs the fixture's dependencies (about a minute); later runs reuse
   delete that directory to force a clean install. The gates need network access on the first run.
 - **`npm run build` fails in the repair loop** - the trace shows the gate output and every repair.
   The run gives up after 2 candidates with 3 repairs each and marks the escalation `failed`.
-- **No deployment found after 8 minutes** - the Vercel project is not linked to the repository, or
+- **No deployment found after 10 minutes** - the Vercel project is not linked to the repository, or
   `TARGET_VERCEL_PROJECT` names a different project. The worker matches `meta.githubCommitSha` to
-  the squash-merge commit.
+  the squash-merge commit. The run stops with a `status` trace event and leaves the row `deploying`
+  with the reason in `error`; the pull request is merged either way.
+- **`the architect returned no files after two attempts`** - the message carries the model's own
+  summary. If it names a convention in the target repository, that repository is telling the model
+  not to build the feature; the prompt already overrides an absence claim, so read the summary
+  before changing anything.
+- **403 `Resource not accessible by personal access token` on `/git/blobs`** - the credential has
+  Issues write but not Contents write. Issues get filed and nothing can be pushed. A fine-grained
+  PAT needs Contents read-and-write on the target repository.
 - **Worker shows offline in the console** - the heartbeat writes through PostgREST every 60 s;
   check `SUPABASE_URL` and the service role key.
 - **Escalation stuck in `awaiting_approval`** - the console must set `escalation.approval`. The

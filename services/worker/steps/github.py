@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import time
+from collections.abc import Iterable
 from typing import Any
 from urllib.parse import quote
 
@@ -181,12 +182,27 @@ class GitHubClient:
         blob = self._request("POST", self._repo_path("/git/blobs"), json={"content": encoded, "encoding": "base64"})
         return blob["sha"]
 
-    def push_files(self, branch: str, parent_sha: str, files: dict[str, str], message: str) -> str:
-        """Create blobs, a tree on top of the parent's tree, a commit with the parent set, then move the ref."""
+    def push_files(
+        self,
+        branch: str,
+        parent_sha: str,
+        files: dict[str, str],
+        message: str,
+        deletions: Iterable[str] = (),
+    ) -> str:
+        """Create blobs, a tree on top of the parent's tree, a commit with the parent set, then move the ref.
+
+        A path with a null `sha` removes that file from the tree, which is how a commit deletes one
+        through the Git data API.
+        """
         base_tree = self.get_commit_tree_sha(parent_sha)
-        tree_entries = [
+        tree_entries: list[dict[str, Any]] = [
             {"path": path, "mode": "100644", "type": "blob", "sha": self.create_blob(content)}
             for path, content in sorted(files.items())
+        ]
+        tree_entries += [
+            {"path": path, "mode": "100644", "type": "blob", "sha": None}
+            for path in sorted(set(deletions) - set(files))
         ]
         tree = self._request("POST", self._repo_path("/git/trees"), json={"base_tree": base_tree, "tree": tree_entries})
         commit = self._request(

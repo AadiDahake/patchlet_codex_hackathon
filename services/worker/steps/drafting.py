@@ -50,8 +50,17 @@ def draft_with_gates(
 ) -> Draft:
     agents_md = repo.read_file(root, "AGENTS.md") or "(no AGENTS.md)"
     dependencies = codegen.dependency_block(root)
-    planned_paths = [f.path for f in plan.files]
-    originals = applier.snapshot(root, planned_paths)
+    written_plan = [f for f in plan.files if not f.is_delete]
+    # A guard the plan removes is part of the change, and no model call writes it.
+    deletions = [f.path for f in plan.files if f.is_delete]
+    originals = applier.snapshot(root, [f.path for f in plan.files])
+    for planned in plan.files:
+        if planned.is_delete:
+            reporter.tool(
+                f"Deleting {planned.path}", "delete_file", "fs",
+                planned.reason or "superseded by this change",
+                f"{len((originals.get(planned.path) or '').splitlines())} lines removed",
+            )
 
     install = applier.ensure_node_modules(root, repo_slug)
     _report_gates(reporter, [install], "dependencies")
@@ -63,10 +72,10 @@ def draft_with_gates(
     for candidate in range(1, MAX_CANDIDATES + 1):
         label = f"candidate {candidate}"
         files: dict[str, str] = {}
-        for planned in plan.files:
+        for planned in written_plan:
             existing = originals.get(planned.path)
             context = {p: c for p, c in files.items()}
-            for other in plan.files:
+            for other in written_plan:
                 if other.path not in context and other.path != planned.path and originals.get(other.path):
                     context[other.path] = originals[other.path] or ""
             content = codegen.draft_file(req, issue_title, issue_body, plan, planned, existing, agents_md, context, dependencies)
@@ -79,7 +88,7 @@ def draft_with_gates(
                 output_summary=f"{len(content.splitlines())} lines",
             )
 
-        applier.apply_files(root, files)
+        applier.apply_files(root, files, deletions)
         results = applier.run_gates(root, repo_slug, install=False)
         _report_gates(reporter, results, label)
         failure = _first_failure(results)
@@ -98,18 +107,19 @@ def draft_with_gates(
                     input_summary=failure.output.strip().splitlines()[-1][:300] if failure.output.strip() else failure.name,
                     output_summary=f"{len(files[path].splitlines())} lines",
                 )
-            applier.apply_files(root, files)
+            applier.apply_files(root, files, deletions)
             results = applier.run_gates(root, repo_slug, install=False)
             _report_gates(reporter, results, f"{label}, repair {repairs}")
             failure = _first_failure(results)
 
         if failure is None:
             changed = {path: content for path, content in files.items() if content != originals.get(path)}
-            if not changed:
+            if not changed and not deletions:
                 raise RuntimeError("the editor returned every file unchanged")
-            diffs = applier.unified_diffs(originals, changed)
+            diffs = applier.unified_diffs(originals, changed, deletions)
             return Draft(
                 files=changed,
+                deletions=deletions,
                 diffs=[{"path": d["path"], "patch": d["patch"]} for d in diffs],
                 summary=plan.summary,
                 base_sha=plan.base_sha or repo.head_sha(root),

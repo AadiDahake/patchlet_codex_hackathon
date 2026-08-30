@@ -1,4 +1,4 @@
-"""Local clone of the target repository: clone, list files, rank them, read heads."""
+"""Local clone of the target repository: clone, list files, rank them, read them."""
 
 from __future__ import annotations
 
@@ -12,6 +12,31 @@ import config
 SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".css", ".md", ".json", ".mdx"}
 IGNORED_DIRS = {"node_modules", ".next", ".git", "dist", "out", "build", "coverage", ".vercel"}
 IGNORED_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "next-env.d.ts"}
+
+# Where a change to a product's behaviour lives, and where it does not. The architect is choosing
+# files to edit, so the source tree outranks the material that only describes or checks it.
+SOURCE_PRIORS: tuple[tuple[str, float], ...] = (
+    ("components/", 1.0),
+    ("app/", 1.0),
+    ("lib/", 1.0),
+    ("src/", 1.0),
+    ("styles/", 0.75),
+    ("pages/", 1.0),
+    ("server/", 0.75),
+    ("docs/", -1.5),
+    ("scripts/", -1.5),
+    ("e2e/", -1.0),
+    ("tests/", -1.0),
+    ("test/", -1.0),
+    ("__tests__/", -1.0),
+)
+# A path a convention document points at is a file the repository considers load-bearing.
+REFERENCE_BONUS = 2.5
+# Body matches break ties between paths that score the same. They never outweigh the path itself:
+# a long document that mentions every word must not outrank the module the words are about.
+BODY_WEIGHT = 0.15
+BODY_HITS_PER_TERM = 3
+BODY_SCORE_CAP = 4.0
 STOPWORDS = {
     "the", "a", "an", "to", "of", "for", "and", "or", "in", "on", "is", "it", "be", "add", "with",
     "this", "that", "user", "users", "can", "should", "so", "as", "at", "by", "from", "into", "i",
@@ -79,32 +104,71 @@ def keywords(*texts: str) -> list[str]:
     return ordered
 
 
+BACKTICK_PATH_RE = re.compile(r"`([A-Za-z0-9_./\[\]-]+\.[A-Za-z0-9]+)`")
+
+
+def referenced_paths(paths: list[str], *documents: str) -> set[str]:
+    """The files a convention document names in backticks, which exist in the tree.
+
+    A repository that documents itself says which files carry its contract: NovaAir's AGENTS.md
+    names `lib/seats/index.ts`, `docs/api.md` and the test that guards them. Those are the files an
+    architect has to read before it plans anything, whatever the request's own words happen to be.
+    """
+    known = set(paths)
+    found: set[str] = set()
+    for document in documents:
+        for match in BACKTICK_PATH_RE.findall(document or ""):
+            candidate = match.strip().lstrip("./")
+            if candidate in known:
+                found.add(candidate)
+    return found
+
+
 def _path_score(path: str, terms: list[str]) -> float:
+    """How much this path's own name says it is about the request. The dominant signal, as in the
+    web app's repository probe, which ranks on the path alone."""
     lowered = path.lower()
+    name = Path(lowered).name
     score = 0.0
     for term in terms:
         if term in lowered:
-            score += 3.0 if term in Path(lowered).name else 1.5
-    if lowered.endswith("agents.md") or lowered.endswith("readme.md"):
+            score += 3.0 if term in name else 1.5
+    if name in {"agents.md", "readme.md", "claude.md"}:
         score += 0.5
-    if lowered.startswith(("components/", "app/", "styles/", "src/")):
-        score += 0.5
-    if lowered.startswith("docs/"):
-        score -= 1.0
+    for prefix, prior in SOURCE_PRIORS:
+        if lowered.startswith(prefix):
+            score += prior
+            break
     return score
 
 
-def rank_files(root: Path, paths: list[str], terms: list[str], limit: int = 12) -> list[tuple[str, float]]:
-    """Rank by path match plus keyword occurrences in the file body (capped so one big file cannot dominate)."""
+def _body_score(root: Path, path: str, terms: list[str]) -> float:
+    try:
+        body = (root / path).read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return 0.0
+    hits = sum(min(body.count(term), BODY_HITS_PER_TERM) for term in terms)
+    return min(BODY_WEIGHT * hits, BODY_SCORE_CAP)
+
+
+def rank_files(
+    root: Path,
+    paths: list[str],
+    terms: list[str],
+    limit: int = 12,
+    referenced: set[str] | None = None,
+) -> list[tuple[str, float]]:
+    """Rank by what the path says, then by keyword hits in the body as a bounded tie-breaker.
+
+    `referenced` are paths a convention document names; they carry the repository's contract, so
+    they are lifted whether or not the request happens to use their words.
+    """
+    lifted = referenced or set()
     scored: list[tuple[str, float]] = []
     for path in paths:
-        score = _path_score(path, terms)
-        try:
-            body = (root / path).read_text(encoding="utf-8", errors="ignore").lower()
-        except OSError:
-            body = ""
-        hits = sum(min(body.count(term), 5) for term in terms)
-        score += 0.4 * hits
+        score = _path_score(path, terms) + _body_score(root, path, terms)
+        if path in lifted:
+            score += REFERENCE_BONUS
         scored.append((path, score))
     scored.sort(key=lambda item: (-item[1], item[0]))
     return scored[:limit]
@@ -116,6 +180,18 @@ def read_head(root: Path, path: str, lines: int = 40) -> str:
     except OSError:
         return ""
     return "\n".join(text.splitlines()[:lines])
+
+
+def read_bounded(root: Path, path: str, max_chars: int) -> str:
+    """A file's contents, truncated at a line boundary so the model never reads half a statement."""
+    try:
+        text = (root / path).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    kept = text[:max_chars].rsplit("\n", 1)[0]
+    return f"{kept}\n... (truncated, the file is {len(text)} characters)\n"
 
 
 def read_file(root: Path, path: str) -> str | None:
