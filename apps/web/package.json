@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@patchlet/capability": "*",
     "@patchlet/shared": "*",
     "@runloop/api-client": "1.31.0",
     "@supabase/ssr": "^0.12.4",
