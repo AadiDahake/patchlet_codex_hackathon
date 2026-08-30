@@ -5,7 +5,7 @@
  * group id: the request group, the newest discovery, the newest specification, the newest forge
  * run with its candidates, and the newest outcome.
  */
-import { countManualActions, renderStep, secondsBetween, type CapabilityIR, type EvidenceTrajectory } from "@patchlet/capability";
+import type { CapabilityIR, EvidenceTrajectory } from "@patchlet/capability";
 import type { DeploymentOutcome, Discovery, OpportunitySummary, RequestGroup } from "@patchlet/shared";
 import { toRequestGroup } from "../console/groups";
 import { CANDIDATE_SELECT, toCandidateRow, type CandidateRow } from "../forge/store";
@@ -251,12 +251,27 @@ function refusalsOf(steps: EvidenceTrajectory["steps"]): number {
   return steps.filter((step) => step.event === "seat_selection_rejected").length;
 }
 
-function render(trajectory: EvidenceTrajectory): RepresentativeTrajectory["steps"] {
+/** The compiler's pure renderers: the page says each step in the words the prompts use. */
+type Renderers = Pick<typeof import("@patchlet/capability"), "countManualActions" | "renderStep" | "secondsBetween">;
+
+let renderers: Promise<Renderers> | null = null;
+
+/**
+ * Loaded on first use rather than at import. The compiler reads its prompt files through
+ * `import.meta.url` when its modules evaluate, which a server page's build-time evaluation does
+ * not provide; a request does.
+ */
+function compiler(): Promise<Renderers> {
+  renderers ??= import("@patchlet/capability");
+  return renderers;
+}
+
+function render(trajectory: EvidenceTrajectory, r: Renderers): RepresentativeTrajectory["steps"] {
   return trajectory.steps.map((step, index) => {
     const previous = trajectory.steps[index - 1];
     return {
-      line: renderStep({ t: step.t, event: step.event, props: step.props ?? {} }),
-      seconds: previous ? secondsBetween(previous.t, step.t) : 0,
+      line: r.renderStep({ t: step.t, event: step.event, props: step.props ?? {} }),
+      seconds: previous ? r.secondsBetween(previous.t, step.t) : 0,
     };
   });
 }
@@ -265,8 +280,10 @@ function render(trajectory: EvidenceTrajectory): RepresentativeTrajectory["steps
  * Three sessions that show the three shapes the plan describes: one that went straight to the
  * seats, one that backtracked through refusals, and one that moved each passenger in turn.
  */
-export function representativeTrajectories(trajectories: EvidenceTrajectory[]): RepresentativeTrajectory[] {
+export async function representativeTrajectories(trajectories: EvidenceTrajectory[]): Promise<RepresentativeTrajectory[]> {
   if (trajectories.length === 0) return [];
+  const r = await compiler();
+  const { countManualActions } = r;
   const steps = (t: EvidenceTrajectory) => t.steps.map((s) => ({ t: s.t, event: s.event, props: s.props ?? {} }));
   const scored = trajectories.map((t) => ({
     t,
@@ -289,7 +306,7 @@ export function representativeTrajectories(trajectories: EvidenceTrajectory[]): 
     sessionId: pick.t.session_id,
     label: pick.label,
     replayUrl: pick.t.replay_url ?? null,
-    steps: render(pick.t),
+    steps: render(pick.t, r),
     manualActions: pick.manual,
     refusals: pick.refusals,
     reward: pick.t.reward ? { completion: pick.t.reward.completion ?? null, coherence: pick.t.reward.coherence ?? null } : null,
@@ -370,7 +387,7 @@ export async function loadOpportunity(projectId: string, groupId: string): Promi
       medianInteractions: spec?.medianInteractions ?? discovery?.medianInteractions ?? null,
       replayCount: rows.filter((row) => row.replay_url).length,
       poolCount: rows.length,
-      representative: spec ? representativeTrajectories(spec.ir.evidence.trajectories) : [],
+      representative: spec ? await representativeTrajectories(spec.ir.evidence.trajectories) : [],
     },
     intent: {
       sentence: typeof sentence === "string" ? sentence : null,
