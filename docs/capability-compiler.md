@@ -232,8 +232,8 @@ The live test defines a minimal client in the test file and runs a slice of the 
 the real prompts. Without the key it is skipped.
 
 In the app, `apps/web/lib/opportunity/compile.ts` calls `compile()` with the model client in
-`apps/web/lib/opportunity/model.ts` (`gpt-5.6-luna` for the batched calls, `gpt-5.6-sol` for the
-naming call) over the sessions `apps/web/lib/posthog` mined, writes each event as a `capability`
+`apps/web/lib/opportunity/model.ts` (`gpt-5.6-luna` for goal inference, `gpt-5.6-sol` for the
+reward model and the naming call) over the sessions `apps/web/lib/posthog` mined, writes each event as a `capability`
 trace row and stores the IR in `capability_spec`. `docs/opportunities.md` has the whole pipeline.
 
 ## Supplying a model
