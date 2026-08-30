@@ -18,3 +18,5 @@ __pycache__/
 # into it for each, so a committed copy can never stay clean.
 apps/web/next-env.d.ts
 # apps/web/public/widget.js is committed so the dashboard deployment serves it
+# Local guidance for a Claude session; AGENTS.md is the shared file.
+CLAUDE.md
