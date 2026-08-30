@@ -115,3 +115,77 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/** An opportunity's stage in the story, as a word or two. Status is text, never a colour alone. */
+const OPPORTUNITY_STATUS_LABEL: Record<string, string> = {
+  discovering: "discovering",
+  not_warranted: "no capability warranted",
+  failed: "discovery failed",
+  discovered: "discovered",
+  building: "building",
+  verified: "verified",
+  pr_open: "pr open",
+  merged: "merged",
+  measured: "measured",
+};
+
+export function opportunityStatusLabel(status: string): string {
+  return OPPORTUNITY_STATUS_LABEL[status] ?? status.replace(/_/g, " ");
+}
+
+const OPPORTUNITY_STATUS_TONE: Record<string, string> = {
+  discovering: "is-run",
+  not_warranted: "is-muted",
+  failed: "is-bad",
+  discovered: "is-wait",
+  building: "is-run",
+  verified: "is-good",
+  pr_open: "is-run",
+  merged: "is-good",
+  measured: "is-good",
+};
+
+export function opportunityStatusTone(status: string): string {
+  return OPPORTUNITY_STATUS_TONE[status] ?? "is-muted";
+}
+
+/** A candidate sandbox's state, in the words a person would use. */
+const CANDIDATE_STATUS_LABEL: Record<string, string> = {
+  queued: "queued",
+  provisioning: "provisioning",
+  building: "building",
+  testing: "testing",
+  ready: "ready",
+  failed: "failed",
+  torn_down: "torn down",
+};
+
+export function candidateStatusLabel(status: string): string {
+  return CANDIDATE_STATUS_LABEL[status] ?? status.replace(/_/g, " ");
+}
+
+const CANDIDATE_STATUS_TONE: Record<string, string> = {
+  queued: "is-wait",
+  provisioning: "is-run",
+  building: "is-run",
+  testing: "is-run",
+  ready: "is-good",
+  failed: "is-bad",
+  torn_down: "is-muted",
+};
+
+export function candidateStatusTone(status: string): string {
+  return CANDIDATE_STATUS_TONE[status] ?? "is-muted";
+}
+
+/** "14" or "14.5": a median shown as a person would write it, or "-" when there is none. */
+export function formatMedian(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "-";
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** "1,428". */
+export function formatCount(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "-";
+  return value.toLocaleString("en-US");
+}

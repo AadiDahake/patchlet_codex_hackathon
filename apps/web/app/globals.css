@@ -3189,3 +3189,468 @@ body::before {
 .trace-diff__body::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* --- Opportunities --------------------------------------------------------------- */
+
+/* The four stages of the story run down the page in order. Each heading numbers its stage and
+   names the idea behind it; the card under it carries the evidence. */
+.opp-stage {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 30px 0 12px;
+}
+
+.opp-stage:first-of-type {
+  margin-top: 0;
+}
+
+.opp-stage__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--accent-line-strong);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-size: 0.78rem;
+  font-weight: 800;
+  align-self: center;
+}
+
+.opp-stage__title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.opp-stage__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.opp-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.opp-list .record-card {
+  text-decoration: none;
+  color: inherit;
+}
+
+.opp-list__title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.opp-facts {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin: 0 0 18px;
+}
+
+.opp-fact {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.opp-fact__num {
+  font-family: var(--font-serif);
+  font-size: 1.6rem;
+  line-height: 1.1;
+  color: var(--accent-deep);
+}
+
+.opp-fact__num.is-text {
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.opp-fact__label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.opp-fact__note {
+  color: var(--faint);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.opp-columns {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  align-items: start;
+}
+
+/* One representative session: what the person did, step by step, and the link to watch it. */
+.opp-traj {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--panel);
+  min-width: 0;
+}
+
+.opp-traj__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.opp-traj__label {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.opp-traj__meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.opp-steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 22px;
+  color: var(--ink);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.opp-steps li::marker {
+  color: var(--sage);
+  font-weight: 700;
+}
+
+.opp-steps__delta {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+/* The two reward axes, kept apart: five buckets each. */
+.opp-bars {
+  display: grid;
+  gap: 6px;
+}
+
+.opp-bar {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.opp-bar__track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+
+.opp-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* The specification, read as a table rather than as JSON. */
+.spec-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.spec-table th,
+.spec-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.spec-table th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.spec-table code,
+.spec-inline code {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--accent-deep);
+}
+
+.spec-signature {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--accent-deep);
+  overflow-x: auto;
+}
+
+.spec-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.spec-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+
+.spec-source {
+  color: var(--faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.spec-raw summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.875rem;
+}
+
+.spec-raw .code-block {
+  margin-top: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+/* The generated implementation: five lines that read as a checklist, then the candidates. */
+.opp-check {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.opp-check li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 0.9rem;
+}
+
+.opp-check__state {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.opp-check__state.is-ok {
+  color: var(--accent-deep);
+  font-weight: 700;
+}
+
+.opp-check__state.is-run {
+  color: var(--info-ink);
+}
+
+.opp-check__state.is-bad {
+  color: var(--danger-ink);
+}
+
+.opp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.opp-candidates {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-bottom: 8px;
+}
+
+.opp-candidate {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--panel);
+  font-size: 0.875rem;
+}
+
+.opp-candidate.is-winner {
+  border-color: var(--accent-line-strong);
+  background: var(--accent-soft);
+}
+
+.opp-candidate__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.opp-candidate__label {
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+  color: var(--accent-deep);
+}
+
+.opp-candidate__fails {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--danger-ink);
+  font-size: 0.8rem;
+}
+
+/* The 30-days-later card: before on the left, after on the right, the label in words. */
+.opp-outcome {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.opp-outcome__block {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.opp-outcome__title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.opp-outcome__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.opp-outcome__row strong {
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--accent-deep);
+}
+
+.opp-quiet {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.opp-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--info-ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.opp-live__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--info-ink);
+  animation: opp-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes opp-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .opp-live__dot {
+    animation: none;
+  }
+}
+
+/* The trace rows the pipeline and the sandboxes write. */
+.trace-stage {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.trace-row.is-forge {
+  border-left-color: var(--sage);
+}
+
+.trace-row.is-forge .trace-row__kind {
+  color: var(--accent-deep);
+}
