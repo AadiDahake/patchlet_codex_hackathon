@@ -24,7 +24,8 @@
     "forge:runner": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/forge-runner.ts",
     "forge:sweep": "tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/forge-sweep.ts",
     "seed:site": "tsx --tsconfig apps/web/tsconfig.json scripts/seed-site.ts",
-    "e2e:guide": "playwright test"
+    "e2e:guide": "playwright test",
+    "eval:docs": "tsx --tsconfig apps/web/tsconfig.json scripts/eval-docs.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
