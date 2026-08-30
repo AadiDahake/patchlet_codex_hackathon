@@ -146,8 +146,8 @@ export function renderAcceptance(ir: CapabilityIr): string {
   lines.push(`# Acceptance criteria for \`${ir.intent}\``, "");
   if (ir.summary) lines.push(ir.summary, "");
 
-  lines.push("## Postconditions", "");
-  for (const item of ir.success.postconditions) lines.push(`- \`${item.id}\`: ${item.statement}`);
+  lines.push("## Final state (what must be true after the capability ran)", "");
+  for (const item of ir.success.final_state) lines.push(`- \`${item.id}\`: ${item.statement}`);
   lines.push("");
 
   lines.push("## Constraints (hard rules, a violation is a failure)", "");

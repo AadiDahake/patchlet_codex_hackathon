@@ -6,6 +6,12 @@ sandboxes through three personas, keeps the candidate that verified best, serves
 opens a draft pull request for a person to approve. Nothing it does touches the target
 repository's default branch. The code lives in `apps/web/lib/forge`.
 
+The specification is the Capability IR of `@patchlet/capability` (`docs/capability-compiler.md`).
+The engine imports the compiler's type and `assertCapabilityIR`, so a spec that reaches a sandbox
+is one the compiler's own schema accepted; `lib/forge/ir.ts` adds the one check the schema does not
+make, scenario id uniqueness, because the verifier reports per scenario id. The example the tests
+and the local run use is `lib/forge/fixtures/seat-party-together.ir.json`, with 21 scenarios.
+
 ## Strategies
 
 One engine, three places a candidate can be built. The engine only knows the `SandboxStrategy`

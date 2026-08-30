@@ -6,6 +6,7 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),
       "@patchlet/shared": fileURLToPath(new URL("../../packages/shared/src/index.ts", import.meta.url)),
+      "@patchlet/capability": fileURLToPath(new URL("../../packages/capability/src/index.ts", import.meta.url)),
     },
   },
   test: {
