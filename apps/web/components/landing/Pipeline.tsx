@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { Reveal } from "./Reveal";
 
 const STAGES = [
@@ -16,8 +15,7 @@ const FACTS = [
 ] as const;
 
 /**
- * The five stages, laid out so they always fit the card they sit in, under a real trace from
- * the console.
+ * The five stages, laid out so they always fit the card they sit in.
  *
  * The stages share the width equally in a grid rather than sitting in a row wide enough to need
  * its own scrollbar, and the connector between them is a hairline drawn in the gap, so it costs
@@ -39,19 +37,6 @@ export function Pipeline() {
             down as it happens, and streamed to the console live.
           </p>
         </div>
-
-        {/* The console, as it is: one request, its issue and pull request, and the pause. */}
-        <figure className="product-shot mb-12">
-          <Image
-            src="/landing/console-trace.webp"
-            width={1420}
-            height={822}
-            alt="The Patchlet console's Activity page. The request Add automatic family seat selection is selected, with links to its issue and pull request, and the trace ends on Waiting for approval with Approve and Reject buttons."
-          />
-          <figcaption className="product-shot__caption">
-            The live trace of one request, paused on a developer&rsquo;s approval.
-          </figcaption>
-        </figure>
 
         <div className="rounded-[32px] border border-line/70 bg-panel p-6 sm:p-8 lg:p-12">
           <ol className="pipeline">

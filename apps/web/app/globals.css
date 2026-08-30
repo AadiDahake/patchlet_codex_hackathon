@@ -1046,53 +1046,6 @@ body::before {
   font-weight: 500;
 }
 
-/* --- Product captures --------------------------------------------------------------- */
-
-/*
- * A real capture of the product, with its caption on a frosted chip that overlaps the image's
- * bottom edge: the one place on the landing page where glass sits over something.
- */
-.product-shot {
-  position: relative;
-  margin: 0;
-}
-
-.product-shot img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  box-shadow: var(--shadow-lift);
-}
-
-.product-shot__caption {
-  position: absolute;
-  bottom: -18px;
-  left: 28px;
-  max-width: calc(100% - 56px);
-  padding: 10px 16px;
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  background: var(--glass-strong);
-  box-shadow: var(--glass-highlight), var(--shadow);
-  backdrop-filter: blur(var(--blur)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
-  color: var(--ink);
-  font-size: 0.9rem;
-  line-height: 1.4;
-}
-
-@media (max-width: 640px) {
-  .product-shot__caption {
-    position: static;
-    display: block;
-    max-width: none;
-    margin-top: 12px;
-    border-radius: 14px;
-  }
-}
-
 /* --- Live trace ------------------------------------------------------------------- */
 
 /*
