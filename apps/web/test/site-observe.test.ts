@@ -83,6 +83,19 @@ describe("POST /api/site/observe", () => {
     expect(state.transitions).toEqual([]);
   });
 
+  /**
+   * Nothing about a project is cached: the row is read on every call, so the moment the console
+   * saves a new site the next report from that origin is recorded.
+   */
+  it("takes a page as soon as the project says that is where it lives", async () => {
+    await observe(PREVIEW);
+    expect(state.scans).toEqual([]);
+
+    state.project = { id: "project-1", site_url: "https://novaair-4vs9gj5jt-dahakeaadi-2078s-projects.vercel.app" };
+    await observe(PREVIEW);
+    expect(state.scans).toEqual([PREVIEW.url]);
+  });
+
   it("still records everything while the project has not said where its site is", async () => {
     state.project = { id: "project-1", site_url: null };
     await observe(PREVIEW);

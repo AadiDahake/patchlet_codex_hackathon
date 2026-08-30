@@ -189,6 +189,33 @@ Two sources feed it, through `supabase/migrations/0015_site_graph.sql`:
 The console's "Product map" page lists pages, controls and transitions with last-seen times, the
 known routes, and an "Explore site" action.
 
+### The page in front of the visitor is always on the map
+
+The map is what a route is planned over, so until a page is on it, a control the visitor can see
+is a control the agent cannot point at. That is a race the visitor always loses three ways: the
+scan is written at the start of a turn but the map is read beside it, the map is cached per
+process for `CACHE_MS` (5 s, `apps/web/lib/graph/store.ts`), and a page whose origin is not the
+project's site is never written at all. On the evening of 2026-08-30, on a preview deployment
+carrying a new "Find three seats together" button, all three lined up: the interface check saw the
+button, the candidates did not, and the page planner answered with three clicks on three seats.
+
+So `mapWithCurrentPage` (`apps/web/lib/graph/live.ts`) merges the controls of the page the
+question was asked on into the map the turn plans over - in memory, for that turn, keyed exactly
+as the map keys them, with a `live:` id so a merged control is never mistaken for a stored row.
+The route to one of them is the one step of pressing it, "from this page".
+
+Nothing about that merge writes. What a scan may teach the map is still `belongsToSite` alone
+(`apps/web/lib/graph/origin.ts`), and a route learned on a foreign origin is still not remembered.
+The capabilities check keeps the stored map too: what it searched is a claim about the product,
+not about the page the visitor happens to be on.
+
+A `site_url` change is effective on the very next request. No project lookup is cached anywhere:
+`/api/chat`, `/api/site/observe`, `/api/escalate`, `/api/transcribe`, `/api/speak` and
+`/api/feedback` each read the row by embed key on every call. The only cache in this path is the
+site graph's five seconds, and every write to the graph drops it. A page rejected as foreign after
+the site was changed is an origin that really differs - a scheme, a port, or one of a preview's
+several hostnames - and not a stale read.
+
 ### Deterministic route planning
 
 A question resolves to one target control, and the plan is the shortest path to it
@@ -197,7 +224,7 @@ inserted when a control is hidden behind a tab or a menu on the page as it is no
 never counts steps: the count is the length of the path.
 
 Resolution (`apps/web/lib/agent/resolve.ts`): candidates come from a keyword search over the
-graph, from the controls the documentation passages name, and from the current page; the route to
+map, which by then holds the current page's own controls; the route to
 each candidate is computed first and shown to the model with the candidate; the model chooses the
 target, writes the answer and writes one caption per step of the chosen route. Captions that do
 not pass the plan checks are replaced by ones written from the control's role and name ("Open My
@@ -275,6 +302,18 @@ one word of a capability in a path is one word, not an implementation of it.
 A route is only ever planned to a control that passes it, or to a control that a documentation
 passage names while that passage covers the question. Those are the two doors, and a seat button
 opens neither. Nothing else is put in front of the model to choose from.
+
+The rule holds the interface check to the same line: a name that accounts for the capability is a
+hit however many other words it carries, so "Find three seats together" and "Find seats together"
+say the same thing to it.
+
+It also decides two things about the page planner, the last resort that reads the raw element
+list. It is not reached at all while a control the visitor can see does what was asked - that
+control is the answer, in one step - and the walk it writes is kept only when the last step lands
+on a control that passes one of the two doors (`planEndsOnCapability`). The steps before the last
+open a tab or a dialog and are free; the last one is the answer. On a page where every control
+shares a word with the question, a walk that ends anywhere else is not guidance, so the turn keeps
+the words and drops the steps.
 
 ### Absence with evidence
 

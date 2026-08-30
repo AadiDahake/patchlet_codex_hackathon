@@ -12,6 +12,7 @@ import {
   MODELS,
   controlRefOf,
   coverageNeeded,
+  coversCapability,
   planRoute,
   sameControl,
   searchControls,
@@ -49,6 +50,17 @@ function titleOf(graph: SiteGraph, route: string): string {
   return graph.pages.find((page) => page.route === route)?.title ?? route;
 }
 
+/** The words of the matched passages, once, for "does an article name this control". */
+function documentationText(docs: DocsEvidence[]): string {
+  return docs.map((entry) => `${entry.heading ?? ""} ${entry.snippet}`).join("\n").toLowerCase().trim();
+}
+
+/** Whether those words name this control. A very short label matches too much to count. */
+function namedIn(text: string, name: string): boolean {
+  const label = name.trim().toLowerCase();
+  return text !== "" && label.length >= 4 && text.includes(label);
+}
+
 /**
  * Controls named in the documentation passages. A help article that says "select Change seats"
  * is strong evidence that the control called "Change seats" is the one, even when its name does
@@ -56,15 +68,9 @@ function titleOf(graph: SiteGraph, route: string): string {
  * the only door into the candidates that the control's own name does not have to open.
  */
 function namedInDocs(graph: SiteGraph, docs: DocsEvidence[]): SiteControl[] {
-  const text = docs.map((entry) => `${entry.heading ?? ""} ${entry.snippet}`).join("\n").toLowerCase();
-  if (!text.trim()) return [];
-  const named: SiteControl[] = [];
-  for (const control of graph.controls) {
-    const name = control.name.trim().toLowerCase();
-    if (name.length < 4) continue;
-    if (text.includes(name)) named.push(control);
-  }
-  return named;
+  const text = documentationText(docs);
+  if (text === "") return [];
+  return graph.controls.filter((control) => namedIn(text, control.name));
 }
 
 /**
@@ -120,6 +126,46 @@ export function candidatesFor(
       route: entry.route,
       destination: destinationOf(graph, entry.control),
     }));
+}
+
+/**
+ * The candidates the visitor can see and press right now, and whose own name does what was asked.
+ *
+ * One of these is always the answer: it is on the screen, it does the thing, and the route to it
+ * is the one step of pressing it. It is also what says the page planner is not needed, because
+ * that planner exists for the case where nothing on the page does what was asked.
+ */
+export function controlsOnThisPage(candidates: Candidate[], page: PageContext, feature: string): Candidate[] {
+  const current = currentPageOf(page);
+  return candidates.filter(
+    (candidate) =>
+      candidate.control.route === current.route &&
+      current.visibleKeys?.has(candidate.control.key) === true &&
+      coversCapability(feature, candidate.control.name),
+  );
+}
+
+/**
+ * Whether a plan over the page in front of the visitor ends on a control that does what was
+ * asked: its own name accounts for the capability, or a documentation passage names it.
+ *
+ * The steps before the last one are how a flow is opened - a tab, a menu, a dialog - and they are
+ * free. The last one is the answer, and on a seat map every control shares a word with the
+ * question: without this, "find us three seats together" came back as three clicks on three
+ * seats, which is the thing the visitor was already doing by hand.
+ */
+export function planEndsOnCapability(
+  steps: readonly Step[],
+  page: PageContext,
+  feature: string,
+  docs: DocsEvidence[],
+): boolean {
+  const last = steps[steps.length - 1];
+  if (!last) return false;
+  const affordance = page.affordances.find((candidate) => candidate.id === last.target);
+  if (!affordance) return false;
+  if (coversCapability(feature, affordance.name)) return true;
+  return namedIn(documentationText(docs), affordance.name);
 }
 
 /** How far a candidate is, with an unreachable one last. */

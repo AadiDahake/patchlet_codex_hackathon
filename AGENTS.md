@@ -174,6 +174,14 @@ follows the same rule.
 `npm run demo:reset` clears `known_route` with the rest, because a remembered route answers a
 question before a single check runs and would otherwise pin the last run's answer to the next one.
 
+That rule is about what the map learns, never about what the visitor is told. The page a question
+was asked on is merged into the map the turn plans over (`mapWithCurrentPage` in
+`apps/web/lib/graph/live.ts`), in memory and for that turn only, so a control the visitor can see
+is always a control the answer may point at - whatever the origin, whatever the graph cache holds,
+and whether or not the page has ever been written down. Nothing about that merge writes, and no
+project lookup is cached anywhere, so a `site_url` change takes effect on the next request.
+`docs/guidance.md` has the run this rule comes from.
+
 ## A GitHub issue is opened by a person, and only ever one per gap
 
 Filing in the customer's repository is an outward action. The only thing that authorises it is a
@@ -206,8 +214,10 @@ passage covers the question. There is no third door, and nothing else is put in 
 to choose from.
 
 When the three checks agree that nothing does this, the turn says so and offers the report. The
-page in front of the user is planned over only when the documentation or a control on that page is
-what found the capability; without that, a model handed a seat map will plan a walk through a
+page planner is the last resort and the rule binds it twice: it is never reached while a control
+the visitor can see does what was asked, because that control is the answer in one step, and the
+walk it writes is kept only when the last step lands on a control that passes one of the two doors
+(`planEndsOnCapability`). Without that, a model handed a seat map plans a walk through a
 capability the product has not got. `docs/guidance.md` has the runs this rule comes from.
 
 ## Guiding a user on their own page

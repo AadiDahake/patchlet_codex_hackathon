@@ -6,7 +6,7 @@ import {
   NOVAAIR_GRAPH_AFTER,
   ROUTES,
 } from "../../../packages/shared/test/fixtures/novaair-graph";
-import { bindFirstStep, candidatesFor } from "@/lib/agent/resolve";
+import { bindFirstStep, candidatesFor, planEndsOnCapability } from "@/lib/agent/resolve";
 import type { DocsEvidence } from "@/lib/agent/probes";
 
 const home: PageContext = {
@@ -176,5 +176,46 @@ describe("bindFirstStep with a twin of the control", () => {
       affordances: [{ id: "n1", role: "link", name: "My Booking", landmark: "sidebar", href: "/my-booking", visible: false }],
     };
     expect(bindFirstStep(candidate!.route!.steps, page)?.[0]?.target).toBe("n1");
+  });
+});
+
+/**
+ * The last resort plans over the page itself, which on a seat map is a wall of controls that each
+ * share one word with the question. A walk is only guidance when it ends on the control that does
+ * the thing.
+ */
+describe("planEndsOnCapability", () => {
+  const seatMap: PageContext = {
+    url: "http://localhost:4150/trips/NVA7K2/seats",
+    title: "Choose Seats | NovaAir",
+    affordances: [
+      { id: "s1", role: "button", name: "Seat 1C, available, 45 dollars", landmark: "main", visible: true },
+      { id: "s2", role: "button", name: "Seat 1D, available, 45 dollars", landmark: "main", visible: true },
+      { id: "s3", role: "tab", name: "Seats", landmark: "main", visible: true },
+      { id: "s4", role: "link", name: "Change seats", landmark: "main", href: "/trips/NVA7K2/seats", visible: true },
+      { id: "s5", role: "button", name: "Confirm seats", landmark: "main", visible: true },
+    ],
+  };
+  const step = (target: string) => ({ target, caption: `Select ${target}`, advanceOn: "click" as const });
+
+  it("refuses a sequence of seat cells for a question about seats together", () => {
+    expect(planEndsOnCapability([step("s1"), step("s2")], seatMap, "finding seats together", [])).toBe(false);
+  });
+
+  it("takes a walk that ends on the control whose name does what was asked", () => {
+    expect(planEndsOnCapability([step("s3"), step("s4")], seatMap, "changing a seat", [])).toBe(true);
+  });
+
+  it("takes a control the documentation names, even when its own name does not say it", () => {
+    expect(planEndsOnCapability([step("s5")], seatMap, "finding seats together", [article])).toBe(false);
+    const passage: DocsEvidence = {
+      ...article,
+      snippet: "To sit a family together, select Confirm seats and we take the row for you.",
+    };
+    expect(planEndsOnCapability([step("s5")], seatMap, "finding seats together", [passage])).toBe(true);
+  });
+
+  it("refuses a plan whose last step is not on the page at all", () => {
+    expect(planEndsOnCapability([step("nope")], seatMap, "changing a seat", [])).toBe(false);
   });
 });
