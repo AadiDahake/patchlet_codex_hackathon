@@ -15,14 +15,25 @@ const ADVANCE_ON = new Set<Step["advanceOn"]>(["click", "input", "navigation", "
  * one bad step rejects the whole plan: the caller keeps the prose and drops the guidance rather
  * than walking the user through a partly imaginary interface.
  */
-export function validatePlan(steps: readonly Step[], affordances: readonly Affordance[]): Step[] | null {
-  if (steps.length === 0 || steps.length > MAX_STEPS) return null;
+export function validatePlan(
+  steps: readonly Step[],
+  affordances: readonly Affordance[],
+  maxSteps: number = MAX_STEPS,
+): Step[] | null {
+  if (steps.length === 0 || steps.length > maxSteps) return null;
 
   const known = new Set(affordances.map((affordance) => affordance.id));
   const validated: Step[] = [];
 
-  for (const step of steps) {
-    if (typeof step?.target !== "string" || !known.has(step.target)) return null;
+  for (const [index, step] of steps.entries()) {
+    if (!step) return null;
+    // A step on a later page has no live id yet; it must at least say which control it is. The
+    // first step is what the spotlight draws now, so it always needs a live id.
+    if (step.target === null) {
+      if (index === 0 || !isControl(step.control)) return null;
+    } else if (typeof step.target !== "string" || !known.has(step.target)) {
+      return null;
+    }
     if (typeof step.caption !== "string") return null;
 
     const caption = step.caption.trim();
@@ -31,8 +42,22 @@ export function validatePlan(steps: readonly Step[], affordances: readonly Affor
 
     if (!ADVANCE_ON.has(step.advanceOn)) return null;
 
-    validated.push({ target: step.target, caption, advanceOn: step.advanceOn });
+    const kept: Step = { target: step.target, caption, advanceOn: step.advanceOn };
+    if (isControl(step.control)) kept.control = step.control;
+    validated.push(kept);
   }
 
   return validated;
+}
+
+function isControl(value: unknown): value is NonNullable<Step["control"]> {
+  if (typeof value !== "object" || value === null) return false;
+  const control = value as Record<string, unknown>;
+  return (
+    typeof control.role === "string" &&
+    typeof control.name === "string" &&
+    control.name.trim() !== "" &&
+    typeof control.route === "string" &&
+    control.route !== ""
+  );
 }
