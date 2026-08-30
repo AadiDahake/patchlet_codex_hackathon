@@ -416,7 +416,16 @@ export type Affordance = {
   visible: boolean;      // in viewport and hit-testable
   disabled?: boolean;
 };
-export type PageContext = { url: string; title: string; affordances: Affordance[] };
+export type PageContext = {
+  url: string;
+  title: string;
+  affordances: Affordance[];
+  text?: string;         // the page's visible text, collapsed, at most 2000 characters
+};
+
+// What kind of message the visitor sent, decided before any check runs. `mixed` is also what an
+// unsure classification falls back to, because the product path checks its evidence.
+export type MessageIntent = "chat" | "page" | "product" | "mixed";
 
 // One instruction in a walk. `target` is the live affordance id on the page the widget scanned;
 // it is null for a step on a later page, which the widget binds by `control` when it gets there.
@@ -489,7 +498,7 @@ export type RequestGroup = {
 // /api/chat SSE events, in order of emission
 export type ChatEvent =
   | { type: "conversation"; conversationId: string; messageId: string }
-  | { type: "understanding"; feature: string; intent: "howto" | "feature" | "other"; memory: string[] }
+  | { type: "understanding"; feature: string; intent: MessageIntent; memory: string[] }  // feature is empty for chat and page
   | { type: "probe"; probe: ProbeName; status: "running" }
   | { type: "probe"; probe: ProbeName; status: "done"; result: ProbeResult }
   | { type: "verdict"; verdict: Verdict }
@@ -677,13 +686,30 @@ group id. Two rows land on the conversation that triggered the run with `source:
 2. **Record and recall.** The page the question was asked on is written into the site graph
    (`recordScan`), so a route can start from it. The question's intent key (its concepts, sorted)
    is looked up in `known_route`; a miss is retried by the question's embedding at cosine 0.92 or
-   above once it is in flight. A hit plans the route from the current page over the graph, emits
-   `understanding` and `answer` (`plan.source: "cached"`) and returns: no model call at all.
-3. **Understand** with `MODELS.understand` and a JSON schema: `{intent, feature}`, where `feature`
-   names the capability in the user's own terms ("changing a seat", "finding seats together"). Load
-   what the agent remembers about this `visitorId` (at most 20 facts, oldest first) and emit
-   `understanding` with them as `memory`.
-4. **Three probes in parallel.** Each emits `probe running`, then `probe done`, and writes a
+   above once it is in flight. The question's embedding, the site graph and the read below all
+   start here, together.
+3. **Read the message** with `MODELS.understand` and a JSON schema (`agent/understand.ts`):
+   `{intent, feature}`. `intent` is the `MessageIntent` the rest of the turn is routed on, and
+   `feature` names the capability in the user's own terms ("changing a seat", "finding seats
+   together"), empty for `chat` and `page`. Anything else the model returns lands on `mixed`.
+   Load what the agent remembers about this `visitorId` (at most 20 facts, oldest first) and emit
+   `understanding` with the class, the capability and the facts as `memory`. Write a `model` trace
+   row titled `Read the message: <intent>`.
+
+   | intent | what it is | what the turn does |
+   |---|---|---|
+   | `chat` | a greeting, thanks, small talk, a question about the assistant, or general knowledge that is not about this product | one `MODELS.understand` call over the page context answers it in one or two sentences (`agent/direct.ts`). No probe, no verdict, no request, no offer. `model` trace row with `purpose: "chat"`. |
+   | `page` | a question the page in front of the visitor already answers | the same, over the page's own text and its visible affordances only. Nothing outside the page is cited. When the page does not say, the answer says so and invites the question the product path answers. `purpose: "page"`. |
+   | `product` | what the product can do, or where one of its controls is | the whole path below: known route, three probes, verdict, guidance or absence, report offer. |
+   | `mixed` | part general, part product, or unsure | the same as `product`, and when the verdict is `absent` and the documentation returned a passage scoring at least `DOCS_SURE_MISS`, that passage answers the general half first ("... There is still no way of X here today."). |
+
+   A `chat` or `page` turn stores its assistant message with `probes: []` and `verdict: null`,
+   writes the conversation's outcome and one-sentence summary itself (`solved` when it answered,
+   `unresolved` when the page did not), and still keeps whatever the visitor said about themselves.
+4. **A known route** (`product` and `mixed` only): a hit plans the route from the current page
+   over the graph, emits `answer` with `plan.source: "cached"` and returns, with no search and no
+   further model call.
+5. **Three probes in parallel.** Each emits `probe running`, then `probe done`, and writes a
    `trace_event` with source `agent` and kind `probe`.
    - **docs**: embed the question, call `match_chunks_with_source` for the top 6, and rank them by
      `similarity * (0.6 + 0.4 * overlap)`, where overlap is the share of the question's concepts
@@ -706,11 +732,11 @@ group id. Two rows land on the conversation that triggered the run with `source:
      source files, ranked by keyword. Evidence is `{graph: {pages, controls, matches}, repository:
      {connected, files}}`, and the summary always says how many pages and controls were searched,
      so an absence is grounded in the product and not only in the current page.
-5. **Route** with `routeProbes`. A documentation or interface hit gives `answer`; so does a control
+6. **Route** with `routeProbes`. A documentation or interface hit gives `answer`; so does a control
    found on the site. Code alone gives `hedge`. Nothing at all asks `MODELS.verdict` to confirm
    absence from the three summaries, returning `{exists, confidence, reasoning}`: `exists: false`
    gives `absent`, otherwise `hedge`. Emit `verdict` and write the trace event.
-6. **Answer.**
+7. **Answer.**
    - `answer` with a graph: `candidatesFor` gathers the controls the graph search, the documentation
      passages and the current page point at, one per identity, and computes the route to each with
      `planRoute` first. `MODELS.plan` then chooses the target, writes one or two sentences that
@@ -733,14 +759,14 @@ group id. Two rows land on the conversation that triggered the run with `source:
      words (verified to be a substring of the user message, otherwise empty), and a rationale.
 
    Persist the assistant message with its steps, probes, verdict and feature request. Emit `answer`.
-7. Every stage writes `trace_event` rows, which is what makes the console's Activity page show the
+8. Every stage writes `trace_event` rows, which is what makes the console's Activity page show the
    chat-side reasoning live. The planner writes `decision` rows: "Known route", "Planned the
    route", "Re-planned the route over the product map", and "The route could not start from this
    page" with the reason and the scanned controls.
-8. Close the conversation out for the console: `outcome` is `solved` when the answer carried
+9. Close the conversation out for the console: `outcome` is `solved` when the answer carried
    guidance steps, `missing_feature` when the verdict was `absent`, and `unresolved` otherwise;
    `summary` is one sentence written with `MODELS.understand`. Both are best-effort and never
-   fail the turn. A known route sets them without a model.
+   fail the turn. A known route and a turn that ran no check set them without a model.
 
 ### Continuing a walk
 
@@ -756,8 +782,9 @@ parameter on load, opens, and asks the question once.
 
 ### Grouping and automatic reporting
 
-Nothing is filed for one conversation. Every drafted `FeatureRequest`, whether the user asked for it
-to be reported or not, goes through `apps/web/lib/agent/requests.ts` first:
+Nothing is filed for one conversation, and nothing is drafted for a message that was not about the
+product: a `chat` or `page` turn never reaches this path. Every drafted `FeatureRequest`, whether
+the user asked for it to be reported or not, goes through `apps/web/lib/agent/requests.ts` first:
 
 1. Embed `"title + description"` with `MODELS.embed` and call `match_request_groups`. A nearest
    group at cosine `>= 0.86` (`REQUEST_MATCH_THRESHOLD`) is the same gap, so the request joins it;

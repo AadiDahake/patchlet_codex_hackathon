@@ -123,6 +123,24 @@ never cast it. Concretely:
   applier guards against path traversal for exactly this reason.
 - Never render model output as HTML.
 
+## Not every message is a support request
+
+Every message is classified before anything is searched (`apps/web/lib/agent/understand.ts`, the
+table in section 4 of `docs/contracts.md`): `chat`, `page`, `product` or `mixed`. Only `product`
+and `mixed` run the three checks, the verdict and the absence path. A greeting and a question the
+page already answers are answered directly in `apps/web/lib/agent/direct.ts`, with no probe, no
+verdict and nothing offered to report, because there is nothing missing to report.
+
+Three rules make that safe, and they hold for anything added here later:
+
+- A direct answer never names a control the widget did not send, and never says the product has a
+  feature. A capability is asserted from a probe hit or not at all.
+- Unsure is `mixed`, never `chat`: the class that still checks its evidence is the safe default,
+  and it is where every unreadable classification lands.
+- The classifier's prompt carries three examples of each class and the fixtures in
+  `apps/web/test/fixtures/intents.ts` hold it to them. `understand.live.test.ts` runs them against
+  the real model and skips itself without a key; change the prompt and run it.
+
 ## Guiding a user on their own page
 
 The widget watches the host page; it never drives it. The plan it walks is a route over the site
