@@ -3,20 +3,22 @@
  *
  * The specification is the group's latest compiled capability spec. While the compiler has not
  * stored one, the body may carry it as `spec`. The route refuses before writing anything when the
- * configured strategy cannot run, answers as soon as the run's row exists, and lets the run
- * continue after the response.
+ * configured strategy cannot run, and answers `202` as soon as the queued row exists.
+ *
+ * The run itself is minutes of sandbox work, which is longer than any serverless function may
+ * live, so this route never runs it: `npm run forge:runner` claims the row and carries it. See
+ * `lib/forge/queue.ts` and the "Where a run actually runs" section of `docs/forge.md`.
  */
-import { after } from "next/server";
 import { corsJson, preflight } from "@/lib/cors";
 import { asErrorResponse, currentProject } from "@/lib/console/current";
 import { toRequestGroup } from "@/lib/console/groups";
 import { parseCapabilityIr } from "@/lib/forge/ir";
-import { ForgeStartError, latestCapabilitySpec, startForgeRun } from "@/lib/forge/start";
+import { enqueueForgeRun, ForgeStartError, latestCapabilitySpec } from "@/lib/forge/start";
 import { serviceClient } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 800;
+export const maxDuration = 60;
 
 const GROUP_COLUMNS =
   "id, title, description, area, report_count, user_report_count, priority, status, issue_url, issue_number, pr_url, escalation_id, first_seen, last_seen";
@@ -59,7 +61,7 @@ export async function POST(
 
   try {
     const ir = parseCapabilityIr(specInput);
-    const started = await startForgeRun({
+    const queued = await enqueueForgeRun({
       project: {
         id: project.id,
         repoFullName: project.repoFullName,
@@ -69,8 +71,7 @@ export async function POST(
       ir,
       capabilitySpecId: specId,
     });
-    after(() => started.run());
-    return corsJson({ escalationId: started.escalationId, status: "drafting" }, { status: 202 });
+    return corsJson({ escalationId: queued.escalationId, status: "queued" }, { status: 202 });
   } catch (error) {
     if (error instanceof ForgeStartError) {
       return corsJson({ error: error.message, reason: error.reason }, { status: error.status });
