@@ -213,6 +213,8 @@ export type TraceEvent = {
   projectId: string;
   conversationId: string | null;
   escalationId: string | null;
+  /** The opportunity (request group) the row belongs to, when the writer knew it. */
+  groupId: string | null;
   /** `forge` is the sandbox engine's lane, so the console can colour it apart from the chat. */
   source: "agent" | "workflow" | "forge";
   kind:
