@@ -84,7 +84,7 @@ export function TestQuestion({ hasSources }: { hasSources: boolean }) {
                   <span className="match-row__score">{match.similarity.toFixed(3)}</span>
                   <span className="match-row__title">{match.documentTitle}</span>
                   {match.heading ? (
-                    <span className="text-muted text-[0.84rem]">{match.heading}</span>
+                    <span className="match-row__heading">{match.heading}</span>
                   ) : null}
                   <span className="match-row__where">
                     {match.page === null ? "" : `page ${match.page}`}

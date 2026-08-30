@@ -1,4 +1,5 @@
 import { Eyebrow } from "./Eyebrow";
+import { Reveal } from "./Reveal";
 
 const STAGES = [
   { label: "Widget on your page", tone: "neutral" },
@@ -39,13 +40,15 @@ export function Pipeline() {
           </p>
         </div>
 
-        <div className="rounded-[32px] border border-line/70 bg-panel p-6 shadow-[0_24px_50px_-30px_rgba(23,32,28,0.4)] sm:p-8 lg:p-12">
+        <div className="glass rounded-[32px] p-6 sm:p-8 lg:p-12">
           <ol className="pipeline">
             {STAGES.map((stage, index) => (
               <li key={stage.label} className={`pipeline__stage is-${stage.tone}`}>
                 {index > 0 ? <span className="pipeline__link" aria-hidden /> : null}
-                <span className="pipeline__index">{String(index + 1).padStart(2, "0")}</span>
-                <span className="pipeline__label">{stage.label}</span>
+                <Reveal delay={index * 90}>
+                  <span className="pipeline__index block">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="pipeline__label block">{stage.label}</span>
+                </Reveal>
               </li>
             ))}
           </ol>

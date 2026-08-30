@@ -70,7 +70,7 @@ export function ApprovalCard({
         onChange={(event) => setNote(event.target.value)}
       />
       {error ? (
-        <p className="text-[0.84rem] text-[#8b2f20]" role="alert">
+        <p className="form-error" role="alert">
           {error}
         </p>
       ) : null}

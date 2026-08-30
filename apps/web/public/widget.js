@@ -22,7 +22,7 @@
   --pl-shadow: 0 28px 74px rgba(23, 32, 28, 0.24), 0 2px 10px rgba(23, 32, 28, 0.08);
   --pl-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px rgba(255, 255, 255, 0.28);
   --pl-scrim: rgba(14, 18, 16, 0.42);
-  --pl-blur: blur(28px) saturate(190%);
+  --pl-blur: blur(32px) saturate(170%);
   --pl-serif: ui-serif, Georgia, "Times New Roman", serif;
 
   all: initial;

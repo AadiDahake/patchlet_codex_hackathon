@@ -14,6 +14,9 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen text-ink antialiased selection:bg-accent/15">
+      <noscript>
+        <style>{`.reveal{opacity:1;transform:none}`}</style>
+      </noscript>
       <SiteHeader />
       <Hero />
       <Marquee />
