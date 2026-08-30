@@ -233,7 +233,7 @@ export async function noteRequest(input: {
   request: FeatureRequest;
   conversationId?: string | null;
   messageId?: string | null;
-}): Promise<boolean> {
+}): Promise<{ noted: boolean; groupId: string | null }> {
   try {
     const project = await runProject(input.projectId);
     const join = await recordRequest({
@@ -252,10 +252,10 @@ export async function noteRequest(input: {
         messageId: input.messageId ?? null,
       });
     }
-    return true;
+    return { noted: true, groupId: join.group.id };
   } catch (error) {
     console.error("automatic request note failed:", (error as Error).message);
-    return false;
+    return { noted: false, groupId: null };
   }
 }
 

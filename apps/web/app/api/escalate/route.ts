@@ -4,6 +4,7 @@ import { serviceClient } from "@/lib/supabase";
 import { emitTrace } from "@/lib/trace";
 import { reportRequest } from "@/lib/agent/requests";
 import { assertEngineAvailable } from "@/lib/agent/runner";
+import { triggerDiscovery } from "@/lib/opportunity/queue";
 import type { EscalateRequest, FeatureRequest } from "@patchlet/shared";
 
 export const runtime = "nodejs";
@@ -85,8 +86,18 @@ export async function POST(request: Request): Promise<Response> {
     messageId: body.messageId,
   });
 
+  // The report is also the second question's trigger: does PostHog know other people who
+  // worked around this? Enqueued once per group; a run already made is left alone.
+  void triggerDiscovery({
+    projectId: String(project.id),
+    groupId: reported.group.id,
+    conversationId: body.conversationId ?? null,
+    trigger: "user",
+  });
+
   await emitTrace({
     projectId: String(project.id),
+    groupId: reported.group.id,
     escalationId: reported.escalationId,
     conversationId: body.conversationId ?? null,
     kind: "decision",
