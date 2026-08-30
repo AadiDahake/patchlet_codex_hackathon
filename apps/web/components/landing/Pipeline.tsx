@@ -1,4 +1,4 @@
-import { Eyebrow } from "./Eyebrow";
+import Image from "next/image";
 import { Reveal } from "./Reveal";
 
 const STAGES = [
@@ -10,13 +10,14 @@ const STAGES = [
 ] as const;
 
 const FACTS = [
-  "Three checks before a verdict",
-  "One human approval before a merge",
-  "Every step written to the trace",
+  "Three checks before a verdict.",
+  "One human approval before a merge.",
+  "Every step written to the trace.",
 ] as const;
 
 /**
- * The five stages, laid out so they always fit the card they sit in.
+ * The five stages, laid out so they always fit the card they sit in, under a real trace from
+ * the console.
  *
  * The stages share the width equally in a grid rather than sitting in a row wide enough to need
  * its own scrollbar, and the connector between them is a hairline drawn in the gap, so it costs
@@ -24,12 +25,11 @@ const FACTS = [
  */
 export function Pipeline() {
   return (
-    <section id="pipeline" className="border-t border-line/60 bg-surface/30 py-28 lg:py-36">
+    <section id="pipeline" className="border-t border-line/60 bg-surface/30 py-24 lg:py-32">
       <div className="mx-auto max-w-7xl px-6 lg:px-10">
         <div className="mb-14 grid items-end gap-10 lg:grid-cols-12">
           <div className="lg:col-span-8">
-            <Eyebrow>The pipeline</Eyebrow>
-            <h2 className="mt-5 font-display text-4xl leading-[1.04] tracking-tight sm:text-5xl lg:text-[3.5rem]">
+            <h2 className="font-display text-4xl leading-[1.04] tracking-tight sm:text-5xl lg:text-[3.5rem]">
               Every step is on the <br />
               <span className="font-medium text-accent italic">record.</span>
             </h2>
@@ -40,13 +40,25 @@ export function Pipeline() {
           </p>
         </div>
 
-        <div className="glass rounded-[32px] p-6 sm:p-8 lg:p-12">
+        {/* The console, as it is: one request, its issue and pull request, and the pause. */}
+        <figure className="product-shot mb-12">
+          <Image
+            src="/landing/console-trace.webp"
+            width={1420}
+            height={822}
+            alt="The Patchlet console's Activity page. The request Add automatic family seat selection is selected, with links to its issue and pull request, and the trace ends on Waiting for approval with Approve and Reject buttons."
+          />
+          <figcaption className="product-shot__caption">
+            The live trace of one request, paused on a developer&rsquo;s approval.
+          </figcaption>
+        </figure>
+
+        <div className="rounded-[32px] border border-line/70 bg-panel p-6 sm:p-8 lg:p-12">
           <ol className="pipeline">
             {STAGES.map((stage, index) => (
               <li key={stage.label} className={`pipeline__stage is-${stage.tone}`}>
                 {index > 0 ? <span className="pipeline__link" aria-hidden /> : null}
                 <Reveal delay={index * 90}>
-                  <span className="pipeline__index block">{String(index + 1).padStart(2, "0")}</span>
                   <span className="pipeline__label block">{stage.label}</span>
                 </Reveal>
               </li>

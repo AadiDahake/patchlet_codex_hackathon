@@ -16,9 +16,7 @@ export function SiteFooter() {
         </div>
         <div className="flex gap-10 text-sm sm:col-span-6 sm:justify-end">
           <div className="space-y-2.5">
-            <p className="text-[10px] font-semibold tracking-[0.22em] text-panel/40 uppercase">
-              Product
-            </p>
+            <p className="text-sm font-semibold text-panel/45">Product</p>
             <a href="#features" className="block transition hover:text-panel">
               What it does
             </a>
@@ -30,9 +28,7 @@ export function SiteFooter() {
             </a>
           </div>
           <div className="space-y-2.5">
-            <p className="text-[10px] font-semibold tracking-[0.22em] text-panel/40 uppercase">
-              Account
-            </p>
+            <p className="text-sm font-semibold text-panel/45">Account</p>
             <Link href="/signin" className="block transition hover:text-panel">
               Sign in
             </Link>
@@ -43,7 +39,7 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="border-t border-panel/10">
-        <div className="mx-auto flex max-w-7xl flex-wrap justify-between gap-2 px-6 py-5 text-xs text-panel/50 lg:px-10">
+        <div className="mx-auto flex max-w-7xl flex-wrap justify-between gap-2 px-6 py-5 text-sm text-panel/50 lg:px-10">
           <span>Patchlet</span>
           <span className="font-display italic">Ask once. Get it built.</span>
         </div>

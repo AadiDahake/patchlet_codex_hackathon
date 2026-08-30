@@ -7,7 +7,7 @@
 export const TOKEN_DEFAULTS = {
   '--pl-accent': '#2e6f54',
   '--pl-ink': '#17201c',
-  '--pl-muted': '#68716c',
+  '--pl-muted': '#5b645f',
   '--pl-glass': 'rgba(255, 253, 247, 0.6)',
   '--pl-radius': '18px',
 } as const;
@@ -21,6 +21,8 @@ const SHEET = `
   --pl-radius: ${TOKEN_DEFAULTS['--pl-radius']};
 
   --pl-accent-deep: #174633;
+  /* The accent as text: the deep green on light glass, a lighter green on dark. */
+  --pl-accent-text: var(--pl-accent);
   --pl-glass-strong: rgba(255, 253, 247, 0.82);
   --pl-border: rgba(255, 255, 255, 0.72);
   --pl-hairline: rgba(23, 32, 28, 0.1);
@@ -45,7 +47,8 @@ const SHEET = `
 
 :host([data-pl-scheme="dark"]) {
   --pl-ink: #f2f2f5;
-  --pl-muted: #a0a0aa;
+  --pl-muted: #b3b3bd;
+  --pl-accent-text: #9fd0b5;
   --pl-accent-deep: #2e6f54;
   --pl-glass: rgba(28, 30, 29, 0.66);
   --pl-glass-strong: rgba(30, 30, 36, 0.92);
@@ -188,7 +191,7 @@ const SHEET = `
 }
 .pl-icon-btn:hover { background: var(--pl-field); color: var(--pl-ink); }
 .pl-icon-btn:focus-visible { outline: 2px solid var(--pl-accent); outline-offset: 2px; }
-.pl-icon-btn[aria-pressed="true"] { color: var(--pl-accent); background: color-mix(in srgb, var(--pl-accent) 12%, transparent); }
+.pl-icon-btn[aria-pressed="true"] { color: var(--pl-accent-text); background: color-mix(in srgb, var(--pl-accent) 12%, transparent); }
 .pl-icon-btn svg { width: 17px; height: 17px; }
 
 /* Messages */
@@ -210,9 +213,9 @@ const SHEET = `
   font-weight: 500;
   color: var(--pl-ink);
 }
-.pl-empty p { margin: 0; font-size: 13px; }
+.pl-empty p { margin: 0; font-size: 14px; }
 
-.pl-msg { max-width: 88%; padding: 9px 12px; border-radius: 14px; font-size: 13.5px; }
+.pl-msg { max-width: 88%; padding: 9px 12px; border-radius: 14px; font-size: 14px; }
 .pl-msg--user {
   align-self: flex-end;
   background: color-mix(in srgb, var(--pl-accent) 14%, transparent);
@@ -242,7 +245,7 @@ const SHEET = `
   flex-direction: column;
   gap: 10px;
 }
-.pl-card p { margin: 0; font-size: 13.5px; white-space: pre-wrap; }
+.pl-card p { margin: 0; font-size: 14px; white-space: pre-wrap; }
 .pl-card__label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--pl-muted); }
 .pl-card__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pl-card__note { color: var(--pl-muted); font-size: 12.5px; }
@@ -294,7 +297,7 @@ const SHEET = `
   border: 1px solid var(--pl-hairline);
   max-width: 88%;
 }
-.pl-thinking__line { font-size: 12.5px; color: var(--pl-muted); }
+.pl-thinking__line { font-size: 13px; color: var(--pl-muted); }
 .pl-typing { display: inline-flex; gap: 4px; flex: none; }
 .pl-typing span {
   width: 5px;
@@ -382,7 +385,7 @@ const SHEET = `
 .pl-timeline li[data-state="pending"] { color: var(--pl-muted); }
 .pl-timeline__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pl-timeline__note { color: var(--pl-muted); font-size: 11.5px; }
-.pl-link { color: var(--pl-accent); text-decoration: none; font-weight: 550; }
+.pl-link { color: var(--pl-accent-text); text-decoration: none; font-weight: 550; }
 .pl-link:hover { text-decoration: underline; }
 
 /* Composer */
@@ -413,7 +416,7 @@ const SHEET = `
   outline: 0;
   background: transparent;
   font: inherit;
-  font-size: 13.5px;
+  font-size: 14px;
   color: var(--pl-ink);
   max-height: 96px;
   padding: 3px 0;
@@ -516,13 +519,13 @@ const SHEET = `
   border-top: 0;
 }
 .pl-spot__counter {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--pl-accent);
+  color: var(--pl-accent-text);
 }
-.pl-spot__caption { margin: 0; font-size: 13.5px; line-height: 1.45; }
+.pl-spot__caption { margin: 0; font-size: 14px; line-height: 1.45; }
 .pl-spot__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 1px; }
 .pl-spot--busy .pl-spot__caption { opacity: 0.6; }
 
@@ -555,10 +558,23 @@ export function attachStyles(root: ShadowRoot): void {
 /**
  * Reads the host page's own background and mirrors its brightness, so the widget
  * looks native on a dark console and on a white one without any configuration.
+ *
+ * It looks at what is actually painted behind the widget's corner, walking up from the element
+ * there until something has an opaque colour, because a page whose body only carries a gradient
+ * would otherwise report nothing. The body and the root come next, then the system preference.
  */
 export function detectScheme(): 'light' | 'dark' {
-  const candidates: Element[] = [document.body, document.documentElement].filter(Boolean);
+  const candidates: Element[] = [];
+  if (typeof document.elementFromPoint === 'function') {
+    // Beside the launcher, not under it, so the widget never reads its own colour.
+    const hit = document.elementFromPoint(Math.max(innerWidth - 120, 0), Math.max(innerHeight - 30, 0));
+    for (let node: Element | null = hit; node; node = node.parentElement) {
+      if (node.tagName.toLowerCase() !== 'patchlet-widget') candidates.push(node);
+    }
+  }
+  candidates.push(document.body, document.documentElement);
   for (const element of candidates) {
+    if (!element) continue;
     const colour = getComputedStyle(element).backgroundColor;
     const luminance = relativeLuminance(colour);
     if (luminance !== null) return luminance < 0.4 ? 'dark' : 'light';
