@@ -121,7 +121,7 @@ function ProbeBody({ detail }: { detail: Detail }) {
           </>
         ) : null}
         {num(detail.latencyMs) !== null ? (
-          <span className="text-[0.78rem] text-[var(--faint)]">{num(detail.latencyMs)} ms</span>
+          <span className="trace-row__aside">{num(detail.latencyMs)} ms</span>
         ) : null}
       </div>
       {summary ? <p className="trace-row__text">{summary}</p> : null}
@@ -166,7 +166,7 @@ function VerdictBody({ detail }: { detail: Detail }) {
             {outcome}
           </span>
         ) : null}
-        {feature ? <span className="text-[0.86rem] text-[var(--muted)]">{feature}</span> : null}
+        {feature ? <span className="trace-row__aside is-plain">{feature}</span> : null}
         {confidence !== null ? (
           <span className="trace-score">confidence {confidence.toFixed(2)}</span>
         ) : null}

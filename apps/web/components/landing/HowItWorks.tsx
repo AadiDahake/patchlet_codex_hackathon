@@ -1,5 +1,6 @@
 import { Eyebrow } from "./Eyebrow";
 import { IconBranch, IconChecks, IconScreen } from "./icons";
+import { Reveal } from "./Reveal";
 
 const STEPS = [
   {
@@ -61,10 +62,10 @@ export function HowItWorks() {
             />
           </svg>
 
-          {STEPS.map((step) => (
+          {STEPS.map((step, index) => (
+            <Reveal key={step.n} delay={index * 120} className="h-full">
             <article
-              key={step.n}
-              className="group relative rounded-[28px] border border-line/70 bg-panel p-8 transition-all duration-500 hover:-translate-y-1.5 hover:border-accent/25 hover:shadow-[0_28px_50px_-25px_rgba(23,32,28,0.35)]"
+              className="group relative h-full rounded-[28px] border border-line/70 bg-[var(--glass)] p-8 shadow-[var(--glass-highlight)] backdrop-blur-[30px] transition-all duration-500 hover:-translate-y-1.5 hover:border-accent/25 hover:shadow-[var(--shadow)]"
             >
               <div className="mb-7 flex items-start justify-between">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-line/80 bg-paper text-accent transition-all duration-500 group-hover:border-accent group-hover:bg-accent group-hover:text-panel">
@@ -84,6 +85,7 @@ export function HowItWorks() {
               </h3>
               <p className="text-[15px] leading-relaxed text-ink/65">{step.body}</p>
             </article>
+            </Reveal>
           ))}
         </div>
       </div>

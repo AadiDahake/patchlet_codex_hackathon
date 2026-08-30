@@ -1,4 +1,5 @@
 import { Eyebrow } from "./Eyebrow";
+import { Reveal } from "./Reveal";
 
 const BEFORE = [
   "Screenshot in a ticket thread",
@@ -35,8 +36,12 @@ export function SplitStory() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <CompareCard tone="before" label="Before" lines={BEFORE} />
-          <CompareCard tone="after" label="After" lines={AFTER} />
+          <Reveal>
+            <CompareCard tone="before" label="Before" lines={BEFORE} />
+          </Reveal>
+          <Reveal delay={140}>
+            <CompareCard tone="after" label="After" lines={AFTER} />
+          </Reveal>
         </div>
       </div>
     </section>
@@ -58,7 +63,7 @@ function CompareCard({
       className={`rounded-3xl border p-7 transition-all ${
         isAfter
           ? "-rotate-1 border-accent bg-accent-deep text-panel shadow-2xl shadow-accent/15 hover:rotate-0"
-          : "rotate-1 border-line/70 bg-panel hover:rotate-0"
+          : "rotate-1 border-line/70 bg-[var(--glass)] shadow-[var(--glass-highlight)] backdrop-blur-[30px] hover:rotate-0"
       }`}
     >
       <p

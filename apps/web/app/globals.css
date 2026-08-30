@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 /*
- * Patchlet's surface: warm paper, one moss accent, hairline borders, generous spacing.
- * The tokens below are the whole system. Nothing in a component names a literal colour.
+ * Patchlet's surface: warm paper, one moss accent, hairline borders, generous spacing, and
+ * glass where a panel sits over the soft gradient behind the page.
+ *
+ * The tokens below are the whole system. Nothing in a component names a literal colour. Every
+ * frosted surface is the same recipe: a translucent paper fill, a strong backdrop blur, one
+ * hairline border and a light inner edge (`--glass*` and `--blur`).
  */
 :root {
   --ink: #17201c;
@@ -18,7 +22,21 @@
   --accent: #2e6f54;
   --accent-deep: #174633;
   --accent-soft: #e9f0e8;
+  --accent-line: rgba(46, 111, 84, 0.2);
+  --accent-line-strong: rgba(46, 111, 84, 0.3);
+  --accent-hover-soft: rgba(46, 111, 84, 0.08);
+  --accent-ring: rgba(46, 111, 84, 0.18);
+  --accent-shadow: 0 16px 34px -22px rgba(46, 111, 84, 0.7);
+  --faint-ring: rgba(139, 144, 137, 0.16);
   --sage: #8fbf9f;
+
+  /* Type on the deep accent panels (the sign-in brand column, the embed block). */
+  --on-deep: #f2efe6;
+  --on-deep-2: rgba(242, 239, 230, 0.85);
+  --on-deep-3: rgba(242, 239, 230, 0.76);
+  --on-deep-4: rgba(242, 239, 230, 0.55);
+  --wash-sage-deep: rgba(143, 191, 159, 0.22);
+  --wash-sage-deep-2: rgba(143, 191, 159, 0.12);
 
   /* The two off-accent tones. Every warning and every failure in the app is one of these, so
      there is one place to change either. */
@@ -30,10 +48,32 @@
   --danger-soft: #f8ded8;
   --danger-line: rgba(150, 52, 36, 0.3);
 
+  /* The one cool tone, for a run that is in progress. */
+  --info-ink: #2a4670;
+  --info-soft: #e4eaf3;
+  --info-line: rgba(42, 70, 112, 0.2);
+  --good-soft: #e1efe4;
+  --muted-soft: #ece7db;
+
+  /* Glass. The fill is paper with the backdrop showing through; the blur is what makes it frost. */
+  --glass: rgba(255, 253, 247, 0.62);
+  --glass-strong: rgba(255, 253, 247, 0.84);
+  --glass-soft: rgba(235, 231, 220, 0.5);
+  --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --blur: 30px;
+
+  /* The soft washes behind the page, which the glass blurs. */
+  --wash-green: rgba(143, 191, 159, 0.3);
+  --wash-moss: rgba(46, 111, 84, 0.16);
+  --wash-warm: rgba(214, 196, 160, 0.34);
+
   --shadow: 0 22px 70px -38px rgba(23, 32, 28, 0.55);
   --shadow-lift: 0 30px 60px -34px rgba(23, 32, 28, 0.6);
+  --focus: 0 0 0 3px rgba(46, 111, 84, 0.28);
+  --scrim: rgba(23, 32, 28, 0.38);
 
-  --radius: 16px;
+  --radius: 18px;
   --radius-field: 10px;
 
   /* The sticky console bar's height. Panels below it subtract this to fill the viewport. */
@@ -65,17 +105,83 @@ html {
 }
 
 body {
+  position: relative;
+  isolation: isolate;
   min-height: 100vh;
   margin: 0;
   color: var(--ink);
   font-size: 15px;
   line-height: 1.55;
-  /* Two very soft washes rather than a visible gradient: the backdrop reads as light, not decorated. */
+  background: var(--paper);
+}
+
+/* Three very soft washes on a fixed layer: light, not decorated, and something for glass to blur. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
-    linear-gradient(120deg, rgba(143, 191, 159, 0.18), transparent 34%),
-    radial-gradient(circle at 80% 18%, rgba(46, 111, 84, 0.16), transparent 28%),
-    var(--paper);
-  background-attachment: fixed;
+    radial-gradient(60% 50% at 12% 16%, var(--wash-green), transparent 70%),
+    radial-gradient(48% 42% at 88% 10%, var(--wash-moss), transparent 70%),
+    radial-gradient(56% 46% at 72% 86%, var(--wash-warm), transparent 70%),
+    radial-gradient(40% 36% at 22% 92%, var(--wash-green), transparent 70%);
+}
+
+/* --- Glass utilities ---------------------------------------------------------------- */
+
+/* One recipe for every frosted surface; components below use the same rule by name. */
+.glass,
+.glass-strong {
+  border: 1px solid var(--hairline);
+  background: var(--glass);
+  box-shadow: var(--glass-highlight), var(--shadow);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+}
+
+.glass {
+  border-radius: var(--radius);
+}
+
+.glass-strong {
+  border-radius: var(--radius);
+  background: var(--glass-strong);
+}
+
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  .glass,
+  .glass-strong,
+  .panel,
+  .trace-panel,
+  .auth-card,
+  .drawer__panel,
+  .confirm__panel {
+    background: var(--panel);
+  }
+}
+
+/* Cards that come into view as the page scrolls. Without script they are simply visible. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 700ms ease var(--reveal-delay, 0ms),
+    transform 700ms cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay, 0ms);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }
 
 ::selection {
@@ -108,9 +214,10 @@ body {
   min-height: var(--app-bar-h);
   padding: 14px 32px;
   border-bottom: 1px solid var(--hairline);
-  background: rgba(246, 242, 233, 0.94);
-  backdrop-filter: blur(16px) saturate(150%);
-  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  background: var(--glass-strong);
+  box-shadow: var(--glass-highlight);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
 }
 
 @supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
@@ -159,7 +266,7 @@ body {
 }
 
 .app-nav__tab:hover {
-  background: rgba(46, 111, 84, 0.08);
+  background: var(--accent-hover-soft);
   color: var(--ink);
 }
 
@@ -169,8 +276,8 @@ body {
 }
 
 .app-nav__tab:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus);
 }
 
 /* The compact trigger only exists below the small breakpoint; see the media queries below. */
@@ -182,10 +289,10 @@ body {
   padding: 0 14px;
   border: 1px solid var(--hairline-strong);
   border-radius: 999px;
-  background: rgba(255, 253, 247, 0.7);
+  background: var(--glass);
   color: var(--ink);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 700;
   cursor: pointer;
   transition: border-color 140ms ease, background-color 140ms ease;
@@ -194,7 +301,7 @@ body {
 .app-nav-toggle:hover,
 .app-nav-toggle.is-open {
   border-color: var(--accent);
-  background: rgba(46, 111, 84, 0.08);
+  background: var(--accent-hover-soft);
 }
 
 .app-nav-toggle:focus-visible {
@@ -243,10 +350,10 @@ body {
     padding: 8px;
     border: 1px solid var(--hairline);
     border-radius: 14px;
-    background: rgba(255, 253, 247, 0.98);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    box-shadow: var(--shadow-lift);
+    background: var(--glass-strong);
+    backdrop-filter: blur(var(--blur));
+    -webkit-backdrop-filter: blur(var(--blur));
+    box-shadow: var(--glass-highlight), var(--shadow-lift);
   }
 
   .app-nav.is-open {
@@ -323,8 +430,10 @@ body {
   padding: 22px 24px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  background: var(--glass);
+  box-shadow: var(--glass-highlight), var(--shadow);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
 }
 
 .panel__head {
@@ -352,7 +461,7 @@ body {
   padding: 3px 10px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 800;
   line-height: 1.5;
   letter-spacing: 0.03em;
@@ -360,7 +469,7 @@ body {
 }
 
 .count-pill {
-  border-color: rgba(46, 111, 84, 0.18);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent-deep);
 }
@@ -377,7 +486,10 @@ body {
   padding: 12px 18px;
   border: 1px solid var(--hairline);
   border-radius: 12px;
-  background: rgba(255, 253, 247, 0.7);
+  background: var(--glass);
+  box-shadow: var(--glass-highlight);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
 }
 
 .stat__num {
@@ -389,7 +501,7 @@ body {
 
 .stat__label {
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -407,12 +519,12 @@ body {
   flex: none;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 4px rgba(46, 111, 84, 0.18);
+  box-shadow: 0 0 0 4px var(--accent-ring);
 }
 
 .stat__dot.is-off {
   background: var(--faint);
-  box-shadow: 0 0 0 4px rgba(139, 144, 137, 0.16);
+  box-shadow: 0 0 0 4px var(--faint-ring);
 }
 
 /* --- Controls -------------------------------------------------------------------- */
@@ -453,14 +565,14 @@ body {
 .secondary-action,
 .ghost-action {
   border-color: var(--hairline-strong);
-  background: transparent;
+  background: var(--glass);
   color: var(--ink);
 }
 
 .secondary-action:hover:not(:disabled),
 .ghost-action:hover:not(:disabled) {
   border-color: var(--accent);
-  background: rgba(46, 111, 84, 0.08);
+  background: var(--accent-soft);
 }
 
 .danger-action {
@@ -488,8 +600,8 @@ body {
 .danger-action:focus-visible,
 .filter-chip:focus-visible,
 .link-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus);
   border-radius: 999px;
 }
 
@@ -521,7 +633,7 @@ body {
   padding: 9px 12px;
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-field);
-  background: var(--panel);
+  background: var(--glass-strong);
   color: var(--ink);
   font: inherit;
   font-size: 0.92rem;
@@ -534,11 +646,11 @@ body {
 .field-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(46, 111, 84, 0.14);
+  box-shadow: var(--focus);
 }
 
 .field-input:disabled {
-  background: rgba(235, 231, 220, 0.55);
+  background: var(--glass-soft);
   color: var(--faint);
   cursor: not-allowed;
 }
@@ -554,14 +666,21 @@ body {
 }
 
 .field-input:-webkit-autofill:focus {
-  box-shadow: 0 0 0 1000px var(--panel) inset, 0 0 0 3px rgba(46, 111, 84, 0.14);
+  box-shadow: 0 0 0 1000px var(--panel) inset, var(--focus);
 }
 
 .field-hint {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 0.875rem;
   line-height: 1.5;
+}
+
+/* The one line of error copy under a form. */
+.form-error {
+  margin: 0;
+  color: var(--danger-ink);
+  font-size: 0.875rem;
 }
 
 /* --- Code and links -------------------------------------------------------------- */
@@ -620,9 +739,9 @@ body {
   padding: 0 13px;
   border: 1px solid var(--hairline-strong);
   border-radius: 999px;
-  background: transparent;
+  background: var(--glass);
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
@@ -644,7 +763,7 @@ body {
   min-width: 1.55em;
   padding: 1px 6px;
   border-radius: 999px;
-  background: rgba(23, 32, 28, 0.08);
+  background: var(--hairline);
   font-size: 0.72rem;
   font-weight: 800;
   line-height: 1.5;
@@ -652,7 +771,8 @@ body {
 }
 
 .filter-chip.is-active .filter-chip__count {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--glass-edge);
+  color: var(--accent-deep);
 }
 
 .notice {
@@ -662,7 +782,7 @@ body {
   padding: 18px 20px;
   border: 1px solid var(--hairline);
   border-radius: 14px;
-  background: var(--panel);
+  background: var(--glass);
   color: var(--muted);
   font-size: 0.92rem;
 }
@@ -711,8 +831,10 @@ body {
   padding: 16px 18px;
   border: 1px solid var(--hairline);
   border-radius: 14px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  background: var(--glass);
+  box-shadow: var(--glass-highlight), var(--shadow);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
   text-align: left;
   cursor: pointer;
   transition: transform 140ms ease, border-color 140ms ease;
@@ -720,7 +842,7 @@ body {
 
 .record-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(46, 111, 84, 0.4);
+  border-color: var(--sage);
 }
 
 .record-card.is-selected {
@@ -738,7 +860,7 @@ body {
 .record-card__time {
   margin-left: auto;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 
 .record-card__summary {
@@ -751,7 +873,7 @@ body {
 .record-card__line {
   margin: 0;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   line-height: 1.45;
 }
 
@@ -767,7 +889,7 @@ body {
   min-width: 58px;
   margin-right: 6px;
   color: var(--accent);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -778,7 +900,7 @@ body {
   flex-wrap: wrap;
   gap: 14px;
   color: var(--muted);
-  font-size: 0.76rem;
+  font-size: 0.8rem;
 }
 
 .outcome-badge {
@@ -786,15 +908,15 @@ body {
 }
 
 .outcome-badge.is-good {
-  border-color: rgba(46, 111, 84, 0.2);
-  background: #e1efe4;
+  border-color: var(--accent-line);
+  background: var(--good-soft);
   color: var(--accent-deep);
 }
 
 .outcome-badge.is-run {
-  border-color: rgba(42, 70, 112, 0.2);
-  background: #e4eaf3;
-  color: #2a4670;
+  border-color: var(--info-line);
+  background: var(--info-soft);
+  color: var(--info-ink);
 }
 
 .outcome-badge.is-wait {
@@ -811,7 +933,7 @@ body {
 
 .outcome-badge.is-muted {
   border-color: var(--hairline);
-  background: #ece7db;
+  background: var(--muted-soft);
   color: var(--muted);
 }
 
@@ -902,11 +1024,11 @@ body {
   border-color: var(--accent-deep);
   background: var(--accent-deep);
   color: var(--panel);
-  box-shadow: 0 16px 34px -22px rgba(46, 111, 84, 0.7);
+  box-shadow: var(--accent-shadow);
 }
 
 .pipeline__stage.is-soft {
-  border-color: rgba(46, 111, 84, 0.3);
+  border-color: var(--accent-line-strong);
   background: var(--accent-soft);
   color: var(--accent-deep);
 }
@@ -964,6 +1086,7 @@ body {
 /* Hand-drawn underline under the emphasised words in the hero headline. Painted as a background
    image so it reflows with the text; box-decoration-break redraws it on every wrapped line. */
 .hero-underline {
+  /* The stroke is the accent, spelled as its hex because a data URI cannot read a token. */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 12' preserveAspectRatio='none'%3E%3Cpath d='M2 8C40 3 90 3 130 5c25 1 45 2 68 1' fill='none' stroke='%232e6f54' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: 0 92%;
@@ -1040,8 +1163,10 @@ body {
   height: 100%;
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  background: var(--glass);
+  box-shadow: var(--glass-highlight), var(--shadow);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
   overflow: hidden;
 }
 
@@ -1099,7 +1224,13 @@ body {
 .trace-panel__meta {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
+}
+
+/* Links to the request's own artefacts, in the panel head's band. */
+.trace-panel__links {
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--hairline);
 }
 
 .trace-live {
@@ -1129,10 +1260,10 @@ body {
 @keyframes trace-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(46, 111, 84, 0.35);
+    box-shadow: 0 0 0 0 var(--accent-line);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(46, 111, 84, 0);
+    box-shadow: 0 0 0 5px transparent;
   }
 }
 
@@ -1160,7 +1291,7 @@ body {
   border: 1px solid var(--hairline);
   border-left: 3px solid var(--hairline-strong);
   border-radius: 12px;
-  background: rgba(255, 253, 247, 0.7);
+  background: var(--glass);
 }
 
 .trace-row.is-running {
@@ -1189,7 +1320,7 @@ body {
 
 .trace-row__kind {
   color: var(--accent);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1206,23 +1337,34 @@ body {
 .trace-row__time {
   margin-left: auto;
   color: var(--faint);
-  font-size: 0.74rem;
+  font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
 
 .trace-row__text {
   margin: 0;
   color: var(--muted);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+
+/* Small figures beside a probe row: the latency, the feature name. */
+.trace-row__aside {
+  color: var(--faint);
+  font-size: 0.8rem;
+}
+
+.trace-row__aside.is-plain {
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 
 .trace-kv {
   display: grid;
   gap: 4px;
   margin: 0;
-  font-size: 0.84rem;
+  font-size: 0.875rem;
 }
 
 .trace-kv > div {
@@ -1257,7 +1399,7 @@ body {
   max-width: 240px;
   height: 6px;
   border-radius: 999px;
-  background: rgba(23, 32, 28, 0.08);
+  background: var(--hairline);
   overflow: hidden;
 }
 
@@ -1300,7 +1442,7 @@ body {
 
 .trace-files span {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   line-height: 1.5;
 }
 
@@ -1321,7 +1463,7 @@ body {
 .trace-doc p {
   margin: 0;
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.875rem;
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -1363,12 +1505,12 @@ body {
 }
 
 .trace-diff__line.is-add {
-  background: rgba(46, 111, 84, 0.1);
-  color: #1d5b41;
+  background: var(--good-soft);
+  color: var(--accent-deep);
 }
 
 .trace-diff__line.is-del {
-  background: rgba(179, 38, 30, 0.08);
+  background: var(--danger-soft);
   color: var(--danger-ink);
 }
 
@@ -1389,17 +1531,17 @@ body {
   padding: 8px 14px;
   border: 1px solid var(--accent);
   border-radius: 999px;
-  background: var(--panel);
+  background: var(--glass);
   color: var(--accent-deep);
-  font-size: 0.84rem;
+  font-size: 0.875rem;
   font-weight: 700;
   white-space: nowrap;
   transition: background-color 140ms ease;
 }
 
 .trace-link:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus);
 }
 
 .trace-link:hover {
@@ -1419,7 +1561,7 @@ body {
 
 .approval-card__decided {
   color: var(--accent-deep);
-  font-size: 0.86rem;
+  font-size: 0.875rem;
   font-weight: 700;
 }
 
@@ -1444,7 +1586,7 @@ body {
   padding: 14px 16px;
   border-left: 3px solid var(--accent);
   border-radius: 0 12px 12px 0;
-  background: rgba(46, 111, 84, 0.06);
+  background: var(--accent-soft);
   color: var(--ink);
   font-size: 1rem;
   line-height: 1.55;
@@ -1456,7 +1598,7 @@ body {
   gap: 14px;
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 0.875rem;
 }
 
 .detail-section {
@@ -1516,17 +1658,17 @@ body {
   padding: 12px 16px;
   border: 1px solid var(--hairline);
   border-radius: 12px;
-  background: rgba(255, 253, 247, 0.7);
+  background: var(--glass);
 }
 
 .transcript__row.is-agent {
-  border-color: rgba(46, 111, 84, 0.22);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
 }
 
 .transcript__role {
   color: var(--accent);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1548,7 +1690,7 @@ body {
   display: block;
   margin-top: 14px;
   color: var(--accent);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1575,7 +1717,7 @@ body {
 .turn-feedback {
   margin: 12px 0 0;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
@@ -1592,7 +1734,7 @@ body {
   padding: 10px 14px;
   border: 1px solid var(--hairline);
   border-radius: 12px;
-  background: rgba(255, 253, 247, 0.7);
+  background: var(--glass);
   color: var(--ink);
   font-size: 0.92rem;
   line-height: 1.55;
@@ -1603,7 +1745,7 @@ body {
   padding: 14px 16px;
   border: 1px solid var(--hairline);
   border-radius: 12px;
-  background: var(--panel);
+  background: var(--glass);
 }
 
 .request-card h4 {
@@ -1632,14 +1774,16 @@ body {
   padding: 16px 18px;
   border: 1px solid var(--hairline);
   border-radius: 14px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  background: var(--glass);
+  box-shadow: var(--glass-highlight), var(--shadow);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
   transition: transform 140ms ease, border-color 140ms ease;
 }
 
 .shortcut:hover {
   transform: translateY(-1px);
-  border-color: rgba(46, 111, 84, 0.4);
+  border-color: var(--sage);
 }
 
 .shortcut__title {
@@ -1651,7 +1795,7 @@ body {
 
 .shortcut__text {
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
@@ -1681,7 +1825,7 @@ body {
 }
 
 .field-hint.is-error {
-  color: #a4402f;
+  color: var(--danger-ink);
 }
 
 .checklist {
@@ -1742,14 +1886,14 @@ body {
 
 .checklist__detail {
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
 .checklist__state {
   align-self: center;
   color: var(--faint);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   white-space: nowrap;
 }
 /* --- Sign in ---------------------------------------------------------------------- */
@@ -1757,7 +1901,18 @@ body {
 .auth-shell {
   display: grid;
   min-height: 100vh;
+  box-sizing: border-box;
+  gap: 16px;
+  padding: 16px;
   grid-template-columns: minmax(0, 1fr);
+}
+
+.auth-brand__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  color: inherit;
 }
 
 @media (min-width: 900px) {
@@ -1774,8 +1929,9 @@ body {
   gap: 48px;
   overflow: hidden;
   padding: 56px;
+  border-radius: var(--radius);
   background: var(--accent-deep);
-  color: #f2efe6;
+  color: var(--on-deep);
 }
 
 @media (min-width: 900px) {
@@ -1791,22 +1947,14 @@ body {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(60% 42% at 12% 96%, rgba(143, 191, 159, 0.22), transparent 70%),
-    radial-gradient(46% 36% at 96% 4%, rgba(143, 191, 159, 0.12), transparent 70%);
+    radial-gradient(60% 42% at 12% 96%, var(--wash-sage-deep), transparent 70%),
+    radial-gradient(46% 36% at 96% 4%, var(--wash-sage-deep-2), transparent 70%);
   pointer-events: none;
 }
 
 .auth-brand > * {
   position: relative;
   z-index: 1;
-}
-
-.auth-brand__brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  width: fit-content;
-  color: inherit;
 }
 
 .auth-brand__wordmark {
@@ -1828,7 +1976,7 @@ body {
 .auth-brand__lede {
   max-width: 44ch;
   margin: 18px 0 0;
-  color: rgba(242, 239, 230, 0.76);
+  color: var(--on-deep-3);
   font-size: 1rem;
   line-height: 1.65;
 }
@@ -1839,7 +1987,7 @@ body {
   margin: 32px 0 0;
   padding: 0;
   list-style: none;
-  color: rgba(242, 239, 230, 0.85);
+  color: var(--on-deep-2);
   font-size: 0.95rem;
 }
 
@@ -1861,7 +2009,7 @@ body {
 
 .auth-brand__footnote {
   margin: 0;
-  color: rgba(242, 239, 230, 0.55);
+  color: var(--on-deep-4);
   font-family: var(--font-serif);
   font-size: 0.92rem;
   font-style: italic;
@@ -1882,7 +2030,20 @@ body {
 
 .auth-card {
   width: 100%;
-  max-width: 400px;
+  max-width: 440px;
+  padding: 36px 36px 40px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--glass);
+  box-shadow: var(--glass-highlight), var(--shadow);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+}
+
+@media (max-width: 640px) {
+  .auth-card {
+    padding: 28px 22px 32px;
+  }
 }
 
 .auth-card__mobile-brand {
@@ -1923,7 +2084,7 @@ body {
   padding: 4px;
   border: 1px solid var(--hairline);
   border-radius: 999px;
-  background: rgba(235, 231, 220, 0.6);
+  background: var(--glass-soft);
 }
 
 .auth-toggle button {
@@ -1949,8 +2110,8 @@ body {
 }
 
 .auth-toggle button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus);
 }
 
 .auth-form {
@@ -1975,7 +2136,7 @@ body {
   border-radius: var(--radius-field);
   background: var(--accent-soft);
   color: var(--accent-deep);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   line-height: 1.5;
 }
 
@@ -2010,7 +2171,7 @@ body {
   padding: 5px 12px 5px 5px;
   border: 1px solid var(--hairline);
   border-radius: 999px;
-  background: rgba(255, 253, 247, 0.7);
+  background: var(--glass);
   color: var(--ink);
   cursor: pointer;
   transition: border-color 140ms ease, background-color 140ms ease;
@@ -2019,12 +2180,12 @@ body {
 .account-trigger:hover,
 .account-trigger.is-open {
   border-color: var(--accent);
-  background: rgba(46, 111, 84, 0.08);
+  background: var(--accent-soft);
 }
 
 .account-trigger:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus);
 }
 
 .account-trigger__avatar {
@@ -2063,7 +2224,7 @@ body {
   overflow: hidden;
   max-width: 150px;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2102,10 +2263,10 @@ body {
   padding: 8px;
   border: 1px solid var(--hairline);
   border-radius: 14px;
-  background: rgba(255, 253, 247, 0.98);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-lift);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+  box-shadow: var(--glass-highlight), var(--shadow-lift);
 }
 
 .account-menu__header {
@@ -2159,7 +2320,7 @@ body {
 }
 
 .account-menu__item:hover:not(:disabled) {
-  background: rgba(46, 111, 84, 0.08);
+  background: var(--accent-soft);
 }
 
 .account-menu__item:disabled {
@@ -2172,7 +2333,7 @@ body {
 }
 
 .account-menu__item--danger:hover:not(:disabled) {
-  background: rgba(179, 38, 30, 0.08);
+  background: var(--danger-soft);
 }
 
 /* --- GitHub connection ------------------------------------------------------------ */
@@ -2198,7 +2359,7 @@ body {
 
 .account-menu__error {
   margin: 4px 12px 0;
-  color: #8b2f20;
+  color: var(--danger-ink);
   font-size: 0.8rem;
 }
 
@@ -2237,7 +2398,7 @@ body {
 .bell__trigger:hover,
 .bell__trigger.is-open {
   border-color: var(--hairline);
-  background: rgba(255, 253, 247, 0.9);
+  background: var(--glass-strong);
   color: var(--ink);
 }
 
@@ -2264,8 +2425,10 @@ body {
   padding: 6px;
   border: 1px solid var(--hairline-strong);
   border-radius: 14px;
-  background: var(--panel);
-  box-shadow: var(--shadow-lift);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+  box-shadow: var(--glass-highlight), var(--shadow-lift);
 }
 
 .bell__head {
@@ -2281,7 +2444,7 @@ body {
   margin: 0;
   padding: 4px 12px 12px;
   color: var(--muted);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
 }
 
 .bell__list {
@@ -2317,7 +2480,8 @@ body {
   font-size: 0.76rem;
 }
 
-.github-identity {
+.github-identity,
+.repo-band {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2326,6 +2490,10 @@ body {
   border: 1px solid var(--hairline);
   border-radius: 12px;
   background: var(--accent-soft);
+}
+
+.repo-band {
+  padding: 12px 16px;
 }
 
 .github-identity__body {
@@ -2354,7 +2522,7 @@ body {
 
 .github-identity__source {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
 
 .github-identity__actions {
@@ -2382,7 +2550,7 @@ body {
   padding: 3px;
   border: 1px solid var(--hairline);
   border-radius: 999px;
-  background: var(--surface);
+  background: var(--glass-soft);
 }
 
 .segmented button {
@@ -2391,7 +2559,7 @@ body {
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
@@ -2420,12 +2588,12 @@ body {
 .segmented button.is-active {
   background: var(--panel);
   color: var(--accent-deep);
-  box-shadow: 0 1px 2px rgba(23, 32, 28, 0.12);
+  box-shadow: var(--glass-highlight), 0 1px 2px var(--hairline);
 }
 
 .segmented button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus);
 }
 
 .field-textarea {
@@ -2443,7 +2611,7 @@ body {
   padding: 32px 20px;
   border: 1px dashed var(--hairline-strong);
   border-radius: var(--radius-field);
-  background: rgba(235, 231, 220, 0.35);
+  background: var(--glass-soft);
   text-align: center;
   transition: border-color 140ms ease, background-color 140ms ease;
 }
@@ -2492,7 +2660,7 @@ body {
 
 .dropzone__hint {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
 }
 
 .ingest-feedback {
@@ -2505,8 +2673,8 @@ body {
 }
 
 .ingest-feedback.is-success {
-  border-color: rgba(46, 111, 84, 0.35);
-  background: #e1efe4;
+  border-color: var(--accent-line);
+  background: var(--good-soft);
   color: var(--accent-deep);
 }
 
@@ -2522,7 +2690,7 @@ body {
   padding: 14px 16px;
   border: 1px solid var(--hairline);
   border-radius: 14px;
-  background: var(--panel);
+  background: var(--glass);
 }
 
 .source-row__top {
@@ -2545,7 +2713,7 @@ body {
 
 .source-row__time {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   white-space: nowrap;
 }
 
@@ -2554,7 +2722,7 @@ body {
   flex-wrap: wrap;
   gap: 14px;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 
 .source-row__actions {
@@ -2570,7 +2738,7 @@ body {
   border-radius: 999px;
   background: transparent;
   color: var(--accent-deep);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 700;
   cursor: pointer;
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
@@ -2586,8 +2754,8 @@ body {
 }
 
 .row-action:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus);
 }
 
 .row-action.is-danger {
@@ -2614,7 +2782,7 @@ body {
   padding: 6px 14px 6px 12px;
   border: 1px solid var(--hairline);
   border-radius: 999px;
-  background: rgba(255, 253, 247, 0.7);
+  background: var(--glass);
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
@@ -2644,7 +2812,7 @@ body {
 .gate-banner span {
   flex: 1 1 320px;
   color: var(--muted);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   line-height: 1.5;
 }
 
@@ -2662,7 +2830,7 @@ body {
   inset: 0;
   border: 0;
   padding: 0;
-  background: rgba(23, 32, 28, 0.38);
+  background: var(--scrim);
   cursor: pointer;
 }
 
@@ -2674,8 +2842,10 @@ body {
   padding: 24px;
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius);
-  background: var(--panel);
-  box-shadow: var(--shadow-lift);
+  background: var(--glass-strong);
+  box-shadow: var(--glass-highlight), var(--shadow-lift);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
 }
 
 .confirm__title {
@@ -2704,11 +2874,11 @@ body {
 }
 
 .primary-action.is-danger {
-  background: #8b2f20;
+  background: var(--danger-ink);
 }
 
 .primary-action.is-danger:hover:not(:disabled) {
-  background: #74271b;
+  background: var(--danger-strong);
 }
 
 /* --- Preview drawer ---------------------------------------------------------------- */
@@ -2726,7 +2896,7 @@ body {
   inset: 0;
   border: 0;
   padding: 0;
-  background: rgba(23, 32, 28, 0.34);
+  background: var(--scrim);
   cursor: pointer;
 }
 
@@ -2737,8 +2907,10 @@ body {
   width: min(1180px, 100%);
   flex-direction: column;
   border-left: 1px solid var(--hairline-strong);
-  background: var(--panel);
+  background: var(--glass-strong);
   box-shadow: var(--shadow-lift);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
 }
 
 .drawer__head {
@@ -2816,7 +2988,7 @@ body {
   min-height: 52px;
   padding: 8px 20px;
   border-bottom: 1px solid var(--hairline);
-  background: rgba(235, 231, 220, 0.4);
+  background: var(--glass-soft);
   color: var(--muted);
   font-size: 0.74rem;
   font-weight: 800;
@@ -2948,7 +3120,7 @@ body {
   border-left: 2px solid var(--hairline);
   border-radius: 0 8px 8px 0;
   /* The tint deepens as the reader's confidence falls, so a page reads as a heat map. */
-  background: color-mix(in srgb, var(--danger-soft) calc(var(--tint) * 100%), rgba(235, 231, 220, 0.45));
+  background: color-mix(in srgb, var(--danger-soft) calc(var(--tint) * 100%), var(--glass-soft));
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -2978,7 +3150,7 @@ body {
   padding: 12px 14px;
   border: 1px solid var(--hairline);
   border-radius: 12px;
-  background: rgba(255, 253, 247, 0.7);
+  background: var(--glass);
 }
 
 .match-row__top {
@@ -2997,8 +3169,13 @@ body {
 
 .match-row__title {
   color: var(--ink);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 700;
+}
+
+.match-row__heading {
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 
 .match-row__where {
@@ -3010,7 +3187,7 @@ body {
 .match-row__text {
   margin: 0;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 0.875rem;
   line-height: 1.55;
   overflow-wrap: anywhere;
 }

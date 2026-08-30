@@ -1,4 +1,5 @@
 import { Eyebrow } from "./Eyebrow";
+import { Reveal } from "./Reveal";
 
 const FEATURES = [
   {
@@ -44,18 +45,17 @@ export function Features() {
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map((feature) => (
-            <div
-              key={feature.title}
-              className="group relative overflow-hidden rounded-2xl border border-line/60 bg-surface/70 p-7 transition-all duration-500 hover:-translate-y-1 hover:border-accent/30 hover:shadow-[0_24px_44px_-28px_rgba(23,32,28,0.4)]"
-            >
-              <span
-                aria-hidden
-                className="absolute top-7 bottom-7 left-0 w-[2px] bg-accent/30 transition-colors group-hover:bg-accent"
-              />
-              <h3 className="mb-2 font-display text-[1.35rem] tracking-tight">{feature.title}</h3>
-              <p className="text-[14.5px] leading-relaxed text-ink/65">{feature.body}</p>
-            </div>
+          {FEATURES.map((feature, index) => (
+            <Reveal key={feature.title} delay={index * 80} className="h-full">
+              <div className="group relative h-full overflow-hidden rounded-2xl border border-line/60 bg-[var(--glass-soft)] p-7 shadow-[var(--glass-highlight)] backdrop-blur-[30px] transition-all duration-500 hover:-translate-y-1 hover:border-accent/30 hover:shadow-[var(--shadow)]">
+                <span
+                  aria-hidden
+                  className="absolute top-7 bottom-7 left-0 w-[2px] bg-accent/30 transition-colors group-hover:bg-accent"
+                />
+                <h3 className="mb-2 font-display text-[1.35rem] tracking-tight">{feature.title}</h3>
+                <p className="text-[14.5px] leading-relaxed text-ink/65">{feature.body}</p>
+              </div>
+            </Reveal>
           ))}
         </div>
       </div>

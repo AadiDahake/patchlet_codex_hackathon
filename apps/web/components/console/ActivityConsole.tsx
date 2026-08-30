@@ -303,7 +303,7 @@ function ArtifactLinks({ request }: { request: RequestGroup }) {
   if (links.length === 0) return null;
 
   return (
-    <div className="trace-links border-b border-[var(--hairline)] px-[22px] py-3">
+    <div className="trace-links trace-panel__links">
       {links.map((link) => (
         <a key={link.href} className="trace-link" href={link.href} target="_blank" rel="noreferrer">
           {link.label}

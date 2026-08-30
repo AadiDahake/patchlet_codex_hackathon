@@ -320,7 +320,7 @@ function BoundRepository({
 }) {
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-center gap-3 rounded-[12px] border border-[var(--hairline)] bg-[var(--accent-soft)] px-4 py-3">
+      <div className="repo-band">
         <GithubGlyph />
         <a
           className="ext-link text-[1rem]"
