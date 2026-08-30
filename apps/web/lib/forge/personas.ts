@@ -9,7 +9,6 @@
  * The prompts live beside this file as Markdown so a change to one is reviewable in a diff.
  */
 import { readFileSync } from "node:fs";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { CODEX_MODEL } from "./codex";
 import type { CapabilityIr } from "./ir";
@@ -61,32 +60,45 @@ export const VERIFIER_REPORT_SCHEMA: Record<string, unknown> = {
   },
 };
 
-const PROMPT_FILES: Record<PersonaKey, string> = {
-  capability_builder: "capability-builder.md",
-  ux_builder: "ux-builder.md",
-  capability_verifier: "capability-verifier.md",
-};
-
 /**
- * The prompts directory, wherever the process was started: `apps/web` under `next`, the
- * repository root under the scripts, or a bundle that kept the path.
+ * Reads one prompt. The path is written out twice, as literals, because Next traces the files a
+ * server function reads: a literal path pulls in that one file, a computed one pulls in the
+ * whole project. The first form serves `next` (started in `apps/web`), the second the scripts
+ * (started at the repository root).
  */
-function promptsDir(): string {
-  const candidates = [
-    join(process.cwd(), "lib", "forge", "prompts"),
-    join(process.cwd(), "apps", "web", "lib", "forge", "prompts"),
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, PROMPT_FILES.capability_builder))) return candidate;
+function readFirst(appPath: string, rootPath: string): string {
+  try {
+    return readFileSync(appPath, "utf8");
+  } catch {
+    try {
+      return readFileSync(rootPath, "utf8");
+    } catch {
+      throw new Error(
+        `The persona prompts were not found. Looked for ${appPath} and ${rootPath}. ` +
+          "Start the process from apps/web or from the repository root.",
+      );
+    }
   }
-  throw new Error(
-    `The persona prompts were not found. Looked in: ${candidates.join(", ")}. ` +
-      "Start the process from apps/web or from the repository root.",
-  );
 }
 
 export function readPrompt(key: PersonaKey): string {
-  return readFileSync(join(promptsDir(), PROMPT_FILES[key]), "utf8");
+  switch (key) {
+    case "capability_builder":
+      return readFirst(
+        join(process.cwd(), "lib", "forge", "prompts", "capability-builder.md"),
+        join(process.cwd(), "apps", "web", "lib", "forge", "prompts", "capability-builder.md"),
+      );
+    case "ux_builder":
+      return readFirst(
+        join(process.cwd(), "lib", "forge", "prompts", "ux-builder.md"),
+        join(process.cwd(), "apps", "web", "lib", "forge", "prompts", "ux-builder.md"),
+      );
+    case "capability_verifier":
+      return readFirst(
+        join(process.cwd(), "lib", "forge", "prompts", "capability-verifier.md"),
+        join(process.cwd(), "apps", "web", "lib", "forge", "prompts", "capability-verifier.md"),
+      );
+  }
 }
 
 /** The three personas, prompts loaded from disk once per call. */
