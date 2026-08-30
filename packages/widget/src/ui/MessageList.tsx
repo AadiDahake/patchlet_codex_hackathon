@@ -155,6 +155,8 @@ function TurnView({
         <AnswerCard
           text={turn.answer.text}
           steps={turn.answer.steps}
+          plan={turn.answer.plan}
+          sources={turn.answer.sources}
           guiding={guiding}
           rating={turn.rating}
           canRate={canRate}

@@ -10,6 +10,18 @@ import type {
   ReportBlock,
 } from '../types';
 
+/** A move the user made on their own: the control they pressed and the page it came from. */
+export type ObservedTransition = {
+  fromUrl: string;
+  fromTitle: string;
+  control: { role: string; name: string; landmark?: string; href?: string };
+};
+
+export type ObserveInput = {
+  page: PageContext;
+  transition?: ObservedTransition;
+};
+
 /** Reporting either starts, or is refused for a reason the widget can explain. */
 export type EscalateResult =
   | { ok: true; escalationId: string; status: string }
@@ -104,6 +116,24 @@ export class ApiClient {
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Tells the site graph what this page looks like and, when there is one, the move that led
+   * here. Best effort and fire-and-forget: the page may be unloading, and the graph is a
+   * convenience the widget must never stall on.
+   */
+  async observe(input: ObserveInput): Promise<void> {
+    try {
+      await fetch(this.url('/api/site/observe'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: this.config.key, ...input }),
+        keepalive: true,
+      });
+    } catch {
+      // Nothing to do: the graph simply does not learn from this page.
     }
   }
 

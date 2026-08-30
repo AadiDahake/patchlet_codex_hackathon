@@ -1,6 +1,10 @@
-// Contract types shared with the API. Once @patchlet/shared is available this file
-// becomes a re-export of it, so nothing else in the widget imports the contract
-// from anywhere but here.
+// Contract types shared with the API. The step plan and everything the site graph
+// needs come straight from @patchlet/shared, so the widget and the server can never
+// disagree on what a step is; nothing else in the widget imports the contract from
+// anywhere but here.
+
+export type { AnswerSource, PlanSource, PlanSummary, Step } from '@patchlet/shared';
+import type { AnswerSource, PlanSummary, Step } from '@patchlet/shared';
 
 export type Affordance = {
   id: string;
@@ -15,12 +19,6 @@ export type Affordance = {
 };
 
 export type PageContext = { url: string; title: string; affordances: Affordance[] };
-
-export type Step = {
-  target: string;
-  caption: string;
-  advanceOn: 'click' | 'input' | 'navigation' | 'manual';
-};
 
 export type ProbeName = 'docs' | 'interface' | 'repository';
 
@@ -70,6 +68,12 @@ export type ChatEvent =
       escalation: EscalationOffer;
       /** The gap was recorded for the developers without the user having to ask. */
       noted?: boolean;
+      /** Where the steps came from and how many there are, fixed for the whole walk. */
+      plan?: PlanSummary;
+      /** The documentation the answer rests on. */
+      sources?: AnswerSource[];
+      /** A continuation had to change the route, so the count the user saw is no longer true. */
+      routeChanged?: boolean;
     }
   | { type: 'error'; message: string };
 

@@ -24,6 +24,11 @@ function idFor(result: ScanResult, name: string): string {
 
 const tick = () => new Promise((done) => setTimeout(done, 0));
 
+/** Enough turns of the event loop for a settle, a bind attempt, a recovery and a re-plan. */
+async function flush(turns = 12): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) await tick();
+}
+
 /** jsdom has no layout, so geometry-dependent behaviour needs rects supplied by hand. */
 function boxes(spec: Record<string, [number, number, number, number]>): () => void {
   const undo: (() => void)[] = [];
@@ -63,6 +68,8 @@ function buildDeps(options: {
       return () => {};
     },
     settleMs: 0,
+    // jsdom renders nothing, so there is nothing to wait for before the last look.
+    bindTimeoutMs: 0,
   });
   return {
     machine,
@@ -158,8 +165,7 @@ describe('GuideMachine', () => {
 
     document.getElementById('account')?.remove();
     harness.pageChanged();
-    await tick();
-    await tick();
+    await flush();
 
     expect(harness.replan).toHaveBeenCalledWith(0);
     expect(harness.machine.snapshot.state).toBe('SPOTLIGHTING');
@@ -176,8 +182,7 @@ describe('GuideMachine', () => {
 
     document.getElementById('account')?.remove();
     harness.pageChanged();
-    await tick();
-    await tick();
+    await flush();
 
     expect(harness.machine.snapshot.state).toBe('FAILED');
   });
@@ -213,8 +218,7 @@ describe('GuideMachine', () => {
     const account = document.getElementById('account') as HTMLElement;
     account.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
     account.remove();
-    await tick();
-    await tick();
+    await flush();
 
     expect(harness.machine.snapshot.stepIndex).toBe(1);
     expect(harness.machine.snapshot.state).toBe('SPOTLIGHTING');
@@ -237,8 +241,7 @@ describe('GuideMachine', () => {
       expect(harness.machine.snapshot.target).toBe(document.getElementById('account'));
 
       document.getElementById('account')?.click();
-      await tick();
-      await tick();
+      await flush();
 
       expect(harness.replan).toHaveBeenCalledWith(1);
       expect(harness.machine.snapshot.target).not.toBe(document.getElementById('update'));

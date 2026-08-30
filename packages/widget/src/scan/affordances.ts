@@ -2,7 +2,8 @@ import { computeAccessibleName } from 'dom-accessibility-api';
 import type { Affordance, PageContext } from '../types';
 import { rank, type RankInput } from './rank';
 
-const INTERACTIVE_SELECTOR = [
+/** Everything the scanner treats as a control. Exported so the transition watcher agrees with it. */
+export const INTERACTIVE_SELECTOR = [
   'button',
   'a[href]',
   'input:not([type="hidden"])',
@@ -103,6 +104,18 @@ function matches(element: Element, selector: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The scanner's description of one element, without an id: what identifies it to the graph. */
+export function describeElement(element: Element): Affordance {
+  const candidate = describe(element);
+  const affordance: Affordance = { id: '', role: candidate.role, name: candidate.name, visible: candidate.visible };
+  if (candidate.text && candidate.text !== candidate.name) affordance.text = candidate.text;
+  if (candidate.landmark) affordance.landmark = candidate.landmark;
+  if (candidate.href) affordance.href = candidate.href;
+  if (candidate.disabled) affordance.disabled = true;
+  if (candidate.state) affordance.state = candidate.state;
+  return affordance;
 }
 
 function describe(element: Element): Candidate {

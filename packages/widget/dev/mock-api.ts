@@ -9,9 +9,9 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-
-type Affordance = { id: string; role: string; name: string; landmark?: string; visible: boolean };
-type PageContext = { url: string; title: string; affordances: Affordance[] };
+import { controlKey, controlRefOf, planRoute, routeOf, sameControl } from '@patchlet/shared';
+import type { PageContext, Step } from '@patchlet/shared';
+import { CONTROLS, NOVAAIR_GRAPH } from '../../shared/test/fixtures/novaair-graph';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.MOCK_PORT ?? 4319);
@@ -43,6 +43,7 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
   }
 
   if (path === '/api/chat') return chat(request, response);
+  if (path === '/api/site/observe') return observe(request, response);
   if (path === '/api/escalate') return escalate(request, response);
   if (path.startsWith('/api/escalations/')) return escalationStatus(path, response);
   if (path === '/api/transcribe') return transcribe(request, response);
@@ -84,6 +85,14 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
   const wantsSeat = !wantsTogether && /seat|move .*passenger/i.test(question);
 
   send({ type: 'conversation', conversationId, messageId: randomUUID() });
+
+  // A repeat of a seat question is a known route: the plan comes straight off the graph.
+  if (wantsSeat && continueFrom > 0) {
+    send(seatAnswer(page, continueFrom));
+    response.end();
+    return;
+  }
+
   await sleep(between(150, 300));
   send({
     type: 'understanding',
@@ -95,12 +104,12 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
   const probes = [
     { probe: 'docs', hit: wantsSeat, score: wantsSeat ? 0.84 : 0.31, summary: wantsSeat ? 'The help center explains how to change a seat.' : 'The help center only covers changing one seat.' },
     { probe: 'interface', hit: wantsSeat, score: wantsSeat ? 0.77 : 0.22, summary: wantsSeat ? 'The Seats section and Change seats are on this page.' : 'No control on the seat map groups passengers.' },
-    { probe: 'repository', hit: false, score: 0.11, summary: 'No code path assigns more than one seat.' },
+    { probe: 'repository', hit: wantsSeat, score: wantsSeat ? 1 : 0.11, summary: wantsSeat ? 'The product map has "Change seats" on Manage Trip.' : 'No control on the site groups passengers, and no code path assigns more than one seat.' },
   ];
 
   for (const probe of probes) {
     send({ type: 'probe', probe: probe.probe, status: 'running' });
-    const latencyMs = between(300, 900);
+    const latencyMs = between(120, 400);
     await sleep(latencyMs);
     send({ type: 'probe', probe: probe.probe, status: 'done', result: { ...probe, evidence: [], latencyMs } });
   }
@@ -121,12 +130,20 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
   await sleep(between(200, 400));
 
   if (outcome === 'answer') {
-    send({
-      type: 'answer',
-      text: 'You can change seats under Seats on your Manage Trip page. I will show you.',
-      steps: buildSteps(page, continueFrom),
-      escalation: { offered: false },
-    });
+    // On NovaAir itself the route comes off the site graph, as the real planner computes it. The
+    // static development host has no such graph, so its steps are read off the page as before.
+    const routed = seatAnswer(page, continueFrom);
+    send(
+      routed.steps
+        ? routed
+        : {
+            type: 'answer',
+            text: 'You can change seats under Seats on your Manage Trip page. I will show you.',
+            steps: buildSteps(page, continueFrom),
+            escalation: { offered: false },
+            sources: SEAT_SOURCES,
+          },
+    );
   } else if (outcome === 'absent') {
     send({
       type: 'answer',
@@ -163,6 +180,61 @@ async function chat(request: IncomingMessage, response: ServerResponse): Promise
   response.end();
 }
 
+/** The fixed route on NovaAir: what the real planner computes from the site graph. */
+const SEAT_TARGET = { route: CONTROLS.changeSeats.route, key: CONTROLS.changeSeats.key };
+const SEAT_TEXT = 'You can change seats under Manage Trip. I will show you.';
+const SEAT_SOURCES = [{ title: 'How do I change my seat?', url: '/help/how-do-i-change-my-seat' }];
+
+/** The id, on the page as scanned, of the control a step stands for. */
+function liveId(page: PageContext, step: Step): string | null {
+  if (!step.control) return null;
+  const wantedKey = controlKey(step.control);
+  let loose: string | null = null;
+  for (const affordance of page.affordances) {
+    const ref = controlRefOf(affordance, page.url);
+    if (!sameControl(ref, step.control)) continue;
+    if (controlKey(ref) === wantedKey) return affordance.id;
+    if (loose === null && affordance.visible) loose = affordance.id;
+  }
+  return loose;
+}
+
+/**
+ * The seat-change route from wherever the page is, read off the NovaAir graph exactly as the
+ * server does it: the shortest path to "Change seats", the first step bound to the live page,
+ * the rest carried by identity until the widget reaches their page.
+ */
+function seatAnswer(page: PageContext, continueFrom: number) {
+  const visible = new Set(
+    page.affordances.filter((a) => a.visible).map((a) => controlKey(controlRefOf(a, page.url))),
+  );
+  const active = new Set(
+    page.affordances.filter((a) => a.state?.includes('selected')).map((a) => controlKey(controlRefOf(a, page.url))),
+  );
+  const planned = planRoute(NOVAAIR_GRAPH, { route: routeOf(page.url), visibleKeys: visible, activeKeys: active }, SEAT_TARGET);
+  if (!planned || planned.steps.length === 0) {
+    return { type: 'answer', text: SEAT_TEXT, steps: null, escalation: { offered: false }, sources: SEAT_SOURCES };
+  }
+  const steps: Step[] = planned.steps.map((step, index) => ({
+    ...step,
+    target: index === 0 ? liveId(page, step) : null,
+  }));
+  if (steps[0]?.target === null) {
+    return { type: 'answer', text: SEAT_TEXT, steps: null, escalation: { offered: false }, sources: SEAT_SOURCES };
+  }
+  const total = continueFrom > 0 ? continueFrom + steps.length : steps.length;
+  const routeChanged = continueFrom > 0 && steps.length !== 3 - continueFrom;
+  return {
+    type: 'answer',
+    text: SEAT_TEXT,
+    steps,
+    escalation: { offered: false },
+    plan: { source: continueFrom > 0 ? 'graph' : 'graph', total, destination: { route: SEAT_TARGET.route, title: 'Manage Trip | NovaAir' } },
+    sources: SEAT_SOURCES,
+    ...(routeChanged ? { routeChanged: true } : {}),
+  };
+}
+
 /**
  * Builds steps for the controls that exist right now, stopping at the first one
  * the page does not have yet. The widget asks again with `continueFrom` once the
@@ -181,6 +253,15 @@ function buildSteps(page: PageContext, continueFrom: number) {
     });
   }
   return steps.length ? steps : null;
+}
+
+/* ------------------------------------------------------------ site graph */
+
+/** The widget reports scans and moves; the stand-in only acknowledges them. */
+async function observe(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  await readJson(request);
+  response.writeHead(200, { ...CORS, 'content-type': 'application/json' });
+  response.end(JSON.stringify({ ok: true }));
 }
 
 /* ----------------------------------------------------------- escalations */

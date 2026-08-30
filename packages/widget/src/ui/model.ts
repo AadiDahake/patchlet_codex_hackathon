@@ -1,7 +1,9 @@
 import type {
+  AnswerSource,
   EscalationOffer,
   EscalationView,
   FeedbackRating,
+  PlanSummary,
   ProbeName,
   ProbeResult,
   ReportBlock,
@@ -17,6 +19,10 @@ export type Answer = {
   escalation: EscalationOffer;
   /** The agent recorded the gap for the developers on its own. */
   noted?: boolean;
+  /** Where the steps came from and how many there are, fixed for the whole walk. */
+  plan?: PlanSummary;
+  /** The documentation the answer rests on. */
+  sources?: AnswerSource[];
 };
 
 export type Turn = {

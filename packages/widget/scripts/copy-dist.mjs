@@ -5,8 +5,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const source = resolve(here, '../dist/patchlet.js');
-const target = resolve(here, '../../../apps/web/public/widget.js');
+// The widget itself, and the scanner alone for the explorer.
+const bundles = [
+  { source: resolve(here, '../dist/patchlet.js'), target: resolve(here, '../../../apps/web/public/widget.js') },
+  { source: resolve(here, '../dist/scanner.js'), target: resolve(here, '../../../apps/web/public/scanner.js') },
+];
 
 try {
   await stat(resolve(here, '../../../apps/web'));
@@ -15,6 +18,8 @@ try {
   process.exit(0);
 }
 
-await mkdir(dirname(target), { recursive: true });
-await copyFile(source, target);
-console.log(`[widget] copied dist/patchlet.js -> ${target}`);
+for (const { source, target } of bundles) {
+  await mkdir(dirname(target), { recursive: true });
+  await copyFile(source, target);
+  console.log(`[widget] copied ${source.split('/').slice(-2).join('/')} -> ${target}`);
+}
