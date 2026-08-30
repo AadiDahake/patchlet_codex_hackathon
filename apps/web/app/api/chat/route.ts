@@ -44,7 +44,7 @@ export async function POST(request: Request): Promise<Response> {
   // Continuing a walkthrough is a different job from answering a question: the answer already
   // exists and the user is waiting mid-flow, so it skips straight to the steps that are left.
   if (typeof body.continueFrom === "number" && body.conversationId) {
-    const { text, steps } = await continueGuidance({
+    const { text, steps, routeChanged } = await continueGuidance({
       projectId: project.id as string,
       conversationId: body.conversationId,
       question,
@@ -52,7 +52,7 @@ export async function POST(request: Request): Promise<Response> {
       continueFrom: body.continueFrom,
     });
     return withCors(
-      sse([{ type: "answer", text, steps, escalation: { offered: false } }]),
+      sse([{ type: "answer", text, steps, escalation: { offered: false }, routeChanged }]),
     );
   }
 

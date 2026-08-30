@@ -1,13 +1,19 @@
 /**
  * One chat turn: understand, check three independent sources, route on the
  * evidence, then answer, hedge, or state plainly that the feature is missing.
+ *
+ * A question that resolved before answers from the site graph with no model call at all. A new
+ * question resolves to one control on the site; the route to it is read off the graph, so the
+ * number of steps the widget announces is the number the walk takes.
  */
-import { EFFORT, MODELS, routeProbes, validatePlan } from "@patchlet/shared";
+import { EFFORT, MODELS, MAX_ROUTE_STEPS, planRoute, routeProbes, validatePlan } from "@patchlet/shared";
 import type {
+  AnswerSource,
   ChatEvent,
   EscalationOffer,
   FeatureRequest,
   PageContext,
+  PlanSummary,
   ProbeResult,
   Step,
   Verdict,
@@ -15,10 +21,23 @@ import type {
 import { chatJson, embed } from "../openai";
 import { serviceClient } from "../supabase";
 import { emitTrace } from "../trace";
+import {
+  findKnownRoute,
+  intentKey,
+  loadGraph,
+  nearestKnownRoute,
+  recordScan,
+  saveKnownRoute,
+  touchKnownRoute,
+  type KnownRoute,
+  type StoredGraph,
+} from "../graph/store";
+import { currentPageOf } from "./bind";
 import { loadVisitorFacts, rememberFromTurn } from "./memory";
 import { affordanceList, dropRepeats } from "./page";
-import { probeDocs, probeInterface, probeRepository } from "./probes";
+import { probeDocs, probeInterface, probeRepository, type DocsEvidence } from "./probes";
 import { noteRequest } from "./requests";
+import { bindFirstStep, candidatesFor, resolveTarget } from "./resolve";
 import { closeConversation } from "./summary";
 
 /**
@@ -105,6 +124,73 @@ function memoryBlock(memory: string[]): string {
   return `\n\nWhat we know about this visitor:\n${memory.map((fact) => `- ${fact}`).join("\n")}`;
 }
 
+type Understanding = { intent: "howto" | "feature" | "other"; feature: string };
+
+type BoundRoute = {
+  steps: Step[];
+  target: { route: string; key: string };
+  destination: { route: string; title: string };
+};
+
+/**
+ * A route the graph can walk from this page, bound to the live control it starts with. The
+ * model's captions are used when they pass the same checks as any plan; otherwise the route keeps
+ * the captions written from the controls themselves, which always pass.
+ */
+function routeFromHere(
+  graph: StoredGraph,
+  page: PageContext,
+  target: { route: string; key: string },
+  captions: string[] = [],
+): BoundRoute | { failed: string } {
+  const plan = planRoute(graph, currentPageOf(page), target, captions);
+  if (!plan) return { failed: "the product map has no route from this page to the target" };
+  if (plan.steps.length === 0) return { failed: "the target is already active on this page" };
+  const bound = bindFirstStep(plan.steps, page);
+  if (!bound) return { failed: `the first control of the route, "${plan.steps[0]?.control.name}", is not on the page as scanned` };
+  let steps = validatePlan(bound, page.affordances, MAX_ROUTE_STEPS);
+  if (!steps && captions.length > 0) {
+    const plain = planRoute(graph, currentPageOf(page), target);
+    const rebound = plain ? bindFirstStep(plain.steps, page) : null;
+    steps = rebound ? validatePlan(rebound, page.affordances, MAX_ROUTE_STEPS) : null;
+  }
+  if (!steps) return { failed: "the route did not pass validation" };
+  const destination = graph.pages.find((candidate) => candidate.route === plan.target.route);
+  return {
+    steps,
+    target: plan.target,
+    destination: { route: plan.target.route, title: destination?.title ?? plan.target.route },
+  };
+}
+
+type Persisted = { messageId: string };
+
+async function persistAnswer(input: {
+  conversationId: string;
+  text: string;
+  steps: Step[] | null;
+  probes: ProbeResult[];
+  verdict: Verdict;
+  request: FeatureRequest | null;
+  grounding: unknown;
+}): Promise<Persisted> {
+  const { data } = await serviceClient()
+    .from("message")
+    .insert({
+      conversation_id: input.conversationId,
+      role: "assistant",
+      content: input.text,
+      steps: input.steps,
+      probes: input.probes,
+      verdict: input.verdict,
+      feature_request: input.request,
+      grounding: input.grounding,
+    })
+    .select("id")
+    .single();
+  return { messageId: (data?.id as string) ?? "" };
+}
+
 export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   const db = serviceClient();
   const { projectId, question, page } = input;
@@ -132,34 +218,109 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
   const messageId = (userMessage?.id as string) ?? "";
   yield { type: "conversation", conversationId, messageId };
 
-  // 2. Understand what the user is actually asking about.
+  // 2. The page joins the site graph, and a question asked before answers from it at once.
   //
-  // The question embedding and the visitor's remembered facts depend on nothing the model is
-  // about to say, so all three run together and the slowest one bounds this stage.
+  // The scan is what makes the current page a node a route can start from, so it is written
+  // before the graph is read. The visitor's facts and the exact-intent lookup need no model and
+  // run beside it.
+  const turnStarted = Date.now();
+  const intent = intentKey(question);
   const questionEmbedding = embed([question]).then(([vector]) => {
     if (!vector) throw new Error("The embedding service returned nothing for the question");
     return vector;
   });
   // Claimed here so a failure surfaces at the probe that uses it, not as an unhandled rejection.
   questionEmbedding.catch(() => undefined);
+
+  // The understanding call is the longest thing a new question waits on, so it starts now, beside
+  // the lookups. A known route makes it unnecessary, and then its answer is simply not read.
   const understandStarted = Date.now();
-  const [understanding, memory] = await Promise.all([
-    chatJson<{ intent: "howto" | "feature" | "other"; feature: string }>(
-      MODELS.understand,
-      [
-        {
-          role: "system",
-          content:
-            "Read one support question. Name the product capability it is about in two or three words. Answer with JSON only.",
-        },
-        { role: "user", content: question },
-      ],
-      UNDERSTANDING_SCHEMA,
-      { name: "understanding", maxTokens: 2000, effort: EFFORT.understand },
-    ),
-    // What the agent already knows about this person, so the answer can speak to their situation.
+  const understandingPromise = chatJson<Understanding>(
+    MODELS.understand,
+    [
+      {
+        role: "system",
+        content:
+          "Read one support question. Name the capability the user wants, in their own terms, in two to five words: what they want to do, not the area of the product it belongs to. For example 'finding seats together' or 'changing a seat', never 'seat selection' for both. Answer with JSON only.",
+      },
+      { role: "user", content: question },
+    ],
+    UNDERSTANDING_SCHEMA,
+    { name: "understanding", maxTokens: 2000, effort: EFFORT.understand },
+  );
+  understandingPromise.catch(() => undefined);
+
+  const [, memory, known] = await Promise.all([
+    recordScan(projectId, page, "widget").catch(() => undefined),
     loadVisitorFacts(projectId, input.visitorId),
+    findKnownRoute(projectId, intent).catch(() => null),
   ]);
+  const graph = await loadGraph(projectId);
+
+  let cached: KnownRoute | null = known;
+  if (!cached) {
+    // A new wording of a known question costs the embedding the docs check needs anyway.
+    cached = await questionEmbedding.then((vector) => nearestKnownRoute(projectId, vector)).catch(() => null);
+  }
+  if (cached) {
+    const route = routeFromHere(graph, page, cached.target);
+    if (!("failed" in route)) {
+      yield { type: "understanding", feature: cached.feature, intent: "howto", memory };
+      const plan: PlanSummary = { source: "cached", total: route.steps.length, destination: route.destination };
+      const verdict: Verdict = {
+        outcome: "answer",
+        confidence: 0.9,
+        reasoning: `A question with this intent resolved before to "${cached.target.key.split("|")[1] ?? ""}" on ${route.destination.title}.`,
+        feature: cached.feature,
+      };
+      const persisted = await persistAnswer({
+        conversationId,
+        text: cached.answer,
+        steps: route.steps,
+        probes: [],
+        verdict,
+        request: null,
+        grounding: null,
+      });
+      void emitTrace({
+        projectId,
+        conversationId,
+        kind: "decision",
+        title: `Known route: ${route.steps.length} step${route.steps.length === 1 ? "" : "s"} from the product map`,
+        detail: {
+          source: "cached",
+          intent: cached.intent,
+          feature: cached.feature,
+          target: cached.target,
+          destination: route.destination,
+          steps: route.steps.map((step) => step.caption),
+          modelCalls: 0,
+          latencyMs: Date.now() - turnStarted,
+        },
+        source: "agent",
+      });
+      yield {
+        type: "answer",
+        text: cached.answer,
+        steps: route.steps,
+        escalation: { offered: false },
+        noted: false,
+        plan,
+        sources: cached.sources,
+      };
+      yield { type: "conversation", conversationId, messageId: persisted.messageId || messageId };
+      void touchKnownRoute(cached.id, cached.hitCount).catch(() => undefined);
+      // The console's outcome, without a model: the walk was shown, and that is the summary.
+      await db
+        .from("conversation")
+        .update({ outcome: "solved", summary: `Showed the way to ${cached.feature} from a known route.` })
+        .eq("id", conversationId);
+      return;
+    }
+  }
+
+  // 3. Understand what the user is actually asking about.
+  const understanding = await understandingPromise;
   const understandMs = Date.now() - understandStarted;
   void emitTrace({
     projectId,
@@ -181,7 +342,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     memory,
   };
 
-  // 3. Three independent checks, run together so the slowest bounds the turn.
+  // 4. Three independent checks, run together so the slowest bounds the turn.
   for (const probe of ["docs", "interface", "repository"] as const) {
     yield { type: "probe", probe, status: "running" };
   }
@@ -204,7 +365,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     });
   }
 
-  // 4. Route on the evidence. Absence is confirmed by a reasoning model.
+  // 5. Route on the evidence. Absence is confirmed by a reasoning model.
   let outcome = routeProbes(probes);
   let verdict: Verdict = {
     outcome,
@@ -252,10 +413,12 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     source: "agent",
   });
 
-  // 5. Answer.
-  let text: string;
+  // 6. Answer.
+  let text = "";
   let steps: Step[] | null = null;
   let request: FeatureRequest | null = null;
+  let plan: PlanSummary | undefined;
+  let sources: AnswerSource[] = [];
 
   // The docs passages behind this answer, kept on the message so continuing the
   // guidance later does not have to search for them again.
@@ -263,49 +426,143 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
 
   if (outcome === "answer") {
     grounding = docs.evidence;
-    const planStarted = Date.now();
-    const plan = await chatJson<{ answer: string; steps: Step[] }>(
-      // The evidence is already gathered and the shape is fixed, so this is a small
-      // structured task. A faster model here is what keeps guidance feeling live.
-      MODELS.plan,
-      [
-        {
-          role: "system",
-          content:
-            "You are a support agent embedded in a web page. Answer ONLY from the documentation passages and the listed page elements. If they do not describe how to do exactly what was asked, say plainly that you could not find it and return no steps; never invent a button, page, or setting. Otherwise answer in one or two short sentences, then give the steps the user takes on the page in front of them. Every step target MUST be one of the listed element ids, exactly as written. Order the steps so the first one is a control that is on the page right now: if the flow continues inside a menu or dialog that is not open yet, make the first step the control that opens it and stop there. Never invent an id. Use at most 5 steps. Each caption is at most 12 words and starts with a verb. JSON only.",
+    const docsEvidence = (Array.isArray(docs.evidence) ? docs.evidence : []) as DocsEvidence[];
+    const candidates = graph.controls.length > 0 ? candidatesFor(graph, understanding.feature, page, docsEvidence) : [];
+
+    let answered = false;
+    if (candidates.length > 0) {
+      // The graph knows controls for this. The model picks one and writes the words; the route
+      // is already computed for every candidate, so the count is fixed before the model speaks.
+      const resolution = await resolveTarget({
+        question,
+        feature: understanding.feature,
+        candidates,
+        docs: docsEvidence,
+        docsHit: docs.hit,
+        memory,
+      });
+      void emitTrace({
+        projectId,
+        conversationId,
+        kind: "model",
+        title: resolution.target ? `Resolved the target: "${resolution.target.control.name}"` : "No control does exactly this",
+        detail: {
+          model: MODELS.plan,
+          purpose: "choose the control that does what was asked and write the answer",
+          output_summary: resolution.answer,
+          candidates: candidates.map((candidate) => ({
+            id: candidate.id,
+            name: candidate.control.name,
+            route: candidate.control.route,
+            score: Number(candidate.score.toFixed(2)),
+            steps: candidate.route?.steps.length ?? null,
+          })),
+          chosen: resolution.target?.id ?? null,
+          latencyMs: resolution.latencyMs,
         },
-        {
-          role: "user",
-          content: `Question: ${question}${memoryBlock(memory)}\n\nDocumentation:\n${JSON.stringify(docs.evidence)}\n\nElements on this page:\n${affordanceList(page.affordances)}`,
-        },
-      ],
-      PLAN_SCHEMA,
-      { name: "plan", maxTokens: 4000, effort: EFFORT.plan },
-    );
-    void emitTrace({
-      projectId,
-      conversationId,
-      kind: "model",
-      title: "Planned the answer and the steps",
-      detail: {
-        model: MODELS.plan,
-        purpose: "answer from the documentation and name the controls to point at",
-        output_summary: plan.answer,
-        latencyMs: Date.now() - planStarted,
-      },
-      source: "agent",
-    });
-    text = plan.answer;
-    // A flow often continues behind a menu that is still closed, so the later
-    // targets do not exist yet. Guide as far as this page allows rather than
-    // dropping the whole plan; the widget re-plans once the page changes.
-    const known = new Set(page.affordances.map((a) => a.id));
-    const reachable: Step[] = [];
-    for (const step of dropRepeats(plan.steps ?? [])) {
-      if (!known.has(step.target)) break;
-      reachable.push(step);
+        source: "agent",
+      });
+      sources = resolution.sources;
+      if (resolution.target) {
+        const target = { route: resolution.target.control.route, key: resolution.target.control.key };
+        const route = routeFromHere(graph, page, target, resolution.captions);
+        if ("failed" in route) {
+          void emitTrace({
+            projectId,
+            conversationId,
+            kind: "decision",
+            status: "failed",
+            title: "The route could not start from this page",
+            detail: {
+              target,
+              reason: route.failed,
+              from: currentPageOf(page).route,
+              // What the widget saw, so a binding that failed can be explained from the trace.
+              scanned: page.affordances.map((a) => `${a.id} ${a.role} "${a.name}"${a.landmark ? ` in ${a.landmark}` : ""}${a.href ? ` -> ${a.href}` : ""}${a.visible ? "" : " (hidden)"}`),
+            },
+            source: "agent",
+          });
+        } else {
+          text = resolution.answer || `You can do this with "${resolution.target.control.name}" on ${route.destination.title}. I will show you.`;
+          steps = route.steps;
+          plan = { source: "graph", total: route.steps.length, destination: route.destination };
+          answered = true;
+          void emitTrace({
+            projectId,
+            conversationId,
+            kind: "decision",
+            title: `Planned the route: ${route.steps.length} step${route.steps.length === 1 ? "" : "s"} over the product map`,
+            detail: {
+              source: "graph",
+              from: currentPageOf(page).route,
+              target,
+              destination: route.destination,
+              steps: route.steps.map((step) => step.caption),
+              latencyMs: Date.now() - turnStarted,
+            },
+            source: "agent",
+          });
+          void saveKnownRoute(projectId, {
+            intent,
+            feature: understanding.feature,
+            question,
+            target,
+            answer: text,
+            sources,
+            embedding: await questionEmbedding.catch(() => null),
+          }).catch((error: unknown) => console.warn("known route not saved:", (error as Error).message));
+        }
+      } else if (resolution.answer && docs.hit) {
+        // The documentation answers it and no control is the answer: a policy, a fee, a rule.
+        text = resolution.answer;
+        answered = true;
+      }
     }
-    steps = validatePlan(reachable, page.affordances);
+
+    if (!answered) {
+      // Nothing in the graph to route to: plan over the page in front of the user, as far as it
+      // goes. The graph fills in from this scan, so the next question can do better.
+      const planStarted = Date.now();
+      const pagePlan = await chatJson<{ answer: string; steps: Step[] }>(
+        MODELS.plan,
+        [
+          {
+            role: "system",
+            content:
+              "You are a support agent embedded in a web page. Answer ONLY from the documentation passages and the listed page elements. If they do not describe how to do exactly what was asked, say plainly that you could not find it and return no steps; never invent a button, page, or setting. Otherwise answer in one or two short sentences, then give the steps the user takes on the page in front of them. Every step target MUST be one of the listed element ids, exactly as written. Order the steps so the first one is a control that is on the page right now: if the flow continues inside a menu or dialog that is not open yet, make the first step the control that opens it and stop there. Never invent an id. Use at most 5 steps. Each caption is at most 12 words and starts with a verb. JSON only.",
+          },
+          {
+            role: "user",
+            content: `Question: ${question}${memoryBlock(memory)}\n\nDocumentation:\n${JSON.stringify(docs.evidence)}\n\nElements on this page:\n${affordanceList(page.affordances)}`,
+          },
+        ],
+        PLAN_SCHEMA,
+        { name: "plan", maxTokens: 4000, effort: EFFORT.plan },
+      );
+      void emitTrace({
+        projectId,
+        conversationId,
+        kind: "model",
+        title: "Planned the answer and the steps from this page",
+        detail: {
+          model: MODELS.plan,
+          purpose: "answer from the documentation and name the controls on this page to point at",
+          output_summary: pagePlan.answer,
+          latencyMs: Date.now() - planStarted,
+        },
+        source: "agent",
+      });
+      text = pagePlan.answer;
+      const known = new Set(page.affordances.map((a) => a.id));
+      const reachable: Step[] = [];
+      for (const step of dropRepeats(pagePlan.steps ?? [])) {
+        if (typeof step.target !== "string" || !known.has(step.target)) break;
+        reachable.push(step);
+      }
+      steps = validatePlan(reachable, page.affordances);
+      if (steps) plan = { source: "page", total: steps.length };
+      if (docs.hit) sources = sourcesFrom(docsEvidence);
+    }
   } else {
     const draftStarted = Date.now();
     const drafted = await chatJson<FeatureRequest>(
@@ -346,24 +603,11 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
       : "";
     text =
       outcome === "absent"
-        ? `I am sorry, ${understanding.feature} is not available here today. I checked the documentation, this page, and what this product is known to do, and found nothing.${offer}`
-        : `I could not confirm that ${understanding.feature} exists here. I did not find it in the documentation or on this page.${offer}`;
+        ? `I am sorry, there is no way of ${understanding.feature} here today. I checked the documentation, this page, and what this product is known to do, and found nothing.${offer}`
+        : `I could not confirm that ${understanding.feature} is possible here. I did not find it in the documentation or on this page.${offer}`;
   }
 
-  const { data: assistantMessage } = await db
-    .from("message")
-    .insert({
-      conversation_id: conversationId,
-      role: "assistant",
-      content: text,
-      steps,
-      probes,
-      verdict,
-      feature_request: request,
-      grounding,
-    })
-    .select("id")
-    .single();
+  const persisted = await persistAnswer({ conversationId, text, steps, probes, verdict, request, grounding });
 
   // Even when the user never asks for it, a gap the agent found is worth the developers knowing.
   // It joins the other reports of the same gap and rises with them.
@@ -372,7 +616,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
         projectId,
         request,
         conversationId,
-        messageId: (assistantMessage?.id as string) ?? null,
+        messageId: persisted.messageId || null,
       })
     : false;
 
@@ -382,16 +626,14 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     steps,
     escalation: escalationOffer(request, input.repoFullName),
     noted,
+    ...(plan ? { plan } : {}),
+    ...(sources.length ? { sources } : {}),
   };
 
   // The widget escalates against the assistant message, so hand its id back.
-  yield {
-    type: "conversation",
-    conversationId,
-    messageId: (assistantMessage?.id as string) ?? messageId,
-  };
+  yield { type: "conversation", conversationId, messageId: persisted.messageId || messageId };
 
-  // 6. Remember anything durable the visitor said about themselves, for their next visit.
+  // 7. Remember anything durable the visitor said about themselves, for their next visit.
   try {
     const learned = await rememberFromTurn({
       projectId,
@@ -420,10 +662,23 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<ChatEvent> {
     // Memory is a convenience. A failed extraction must never cost the user their answer.
   }
 
-  // 7. Record how this ended. The user already has the answer; this is only for the console.
+  // 8. Record how this ended. The user already has the answer; this is only for the console.
   try {
     await closeConversation({ conversationId, question, answer: text, steps, verdict });
   } catch {
     // A missing outcome shows as "in progress" in the console and is not worth failing a turn.
   }
+}
+
+/** The articles behind a documentation-grounded answer, at most two, in the order they matched. */
+function sourcesFrom(docs: DocsEvidence[]): AnswerSource[] {
+  const seen = new Set<string>();
+  const sources: AnswerSource[] = [];
+  for (const entry of docs) {
+    const title = entry.documentTitle.trim();
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+    sources.push({ title, url: entry.url });
+  }
+  return sources.slice(0, 2);
 }

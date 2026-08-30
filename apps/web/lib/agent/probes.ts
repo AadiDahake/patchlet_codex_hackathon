@@ -29,6 +29,15 @@ function expand(query: string): string {
   return extra.length ? `${query} ${extra.join(" ")}` : query;
 }
 
+/** One passage the documentation check found, with the article and the address it came from. */
+export type DocsEvidence = {
+  documentTitle: string;
+  url: string | null;
+  heading: string | null;
+  snippet: string;
+  similarity: number;
+};
+
 /**
  * Documentation: cosine search over the ingested chunks, damped by OCR confidence.
  *
@@ -43,13 +52,15 @@ export async function probeDocs(
   const started = Date.now();
   try {
     const vector = embedding ? await embedding : (await embed([question]))[0];
-    const { data, error } = await serviceClient().rpc("match_chunks", {
+    const { data, error } = await serviceClient().rpc("match_chunks_with_source", {
       query_embedding: vector,
       match_count: 6,
       filter_project: projectId,
     });
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as {
+      document_title: string | null;
+      source_ref: string | null;
       heading: string | null;
       content: string;
       similarity: number;
@@ -73,23 +84,26 @@ export async function probeDocs(
     // alone will happily "find" a contact page for a question about theming.
     // Require the passage to actually use the words the question is about.
     const asked = concepts(question);
-    const found = concepts(`${top.heading ?? ""} ${top.content}`);
+    const found = concepts(`${top.document_title ?? ""} ${top.heading ?? ""} ${top.content}`);
     let overlap = 0;
     for (const token of asked) if (found.has(token)) overlap += 1;
     const grounded = asked.size === 0 ? false : overlap / asked.size >= 0.34;
+    const hit = score >= 0.7 && grounded;
+    const evidence: DocsEvidence[] = rows.slice(0, 3).map((row) => ({
+      documentTitle: row.document_title ?? "",
+      url: row.source_ref,
+      heading: row.heading,
+      snippet: row.content.slice(0, 240),
+      similarity: Number(row.similarity.toFixed(3)),
+    }));
     return {
       probe: "docs",
-      hit: score >= 0.7 && grounded,
+      hit,
       score,
-      summary:
-        score >= 0.7 && grounded
-          ? `The documentation covers this (${score.toFixed(2)}).`
-          : `Nothing in the documentation covers this (best ${score.toFixed(2)}).`,
-      evidence: rows.slice(0, 3).map((row) => ({
-        heading: row.heading,
-        snippet: row.content.slice(0, 240),
-        similarity: Number(row.similarity.toFixed(3)),
-      })),
+      summary: hit
+        ? `The documentation covers this: "${top.document_title ?? top.heading ?? "a passage"}" (${score.toFixed(2)}).`
+        : `Nothing in the documentation covers this (best ${score.toFixed(2)}).`,
+      evidence,
       latencyMs: Date.now() - started,
     };
   } catch (error) {

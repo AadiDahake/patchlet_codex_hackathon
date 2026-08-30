@@ -2,16 +2,20 @@
  * Continuing a walkthrough that is already under way.
  *
  * The user is mid-flow with a caption on their screen and their hand on the mouse, so this path
- * spends nothing on work the first turn already did. It reuses that turn's answer and its
- * documentation evidence, reads the page as it looks now, and asks one small model for the steps
- * that are left. No understanding call, no probes, no verdict.
+ * spends nothing it does not have to. The widget only asks when the control it expected is not on
+ * the page after a re-scan, so something about the route has changed. The route is recomputed
+ * over the site graph from the page as it is now, with no model; only when the graph cannot
+ * connect the pages does one small model call read the page and name the steps that are left.
  */
-import { EFFORT, MODELS, validatePlan } from "@patchlet/shared";
+import { EFFORT, MODELS, MAX_ROUTE_STEPS, controlKey, planRoute, validatePlan } from "@patchlet/shared";
 import type { PageContext, Step } from "@patchlet/shared";
 import { chatJson } from "../openai";
 import { serviceClient } from "../supabase";
 import { emitTrace } from "../trace";
+import { loadGraph, recordScan } from "../graph/store";
+import { currentPageOf } from "./bind";
 import { affordanceList, dropRepeats, visibleAffordances } from "./page";
+import { bindFirstStep } from "./resolve";
 
 export type ContinueInput = {
   projectId: string;
@@ -22,7 +26,12 @@ export type ContinueInput = {
   continueFrom: number;
 };
 
-export type ContinueResult = { text: string; steps: Step[] | null };
+export type ContinueResult = {
+  text: string;
+  steps: Step[] | null;
+  /** The steps differ from what the user was told, so the widget says so and shows the new count. */
+  routeChanged: boolean;
+};
 
 const STEPS_SCHEMA = {
   type: "object",
@@ -85,11 +94,40 @@ function doneSoFar(previous: LastAnswer, continueFrom: number): string {
   return `Already done:\n${done.map((step, index) => `${index + 1}. ${step.caption}`).join("\n")}`;
 }
 
-export async function continueGuidance(input: ContinueInput): Promise<ContinueResult> {
-  const started = Date.now();
-  const previous = await lastAssistantMessage(input.conversationId);
-  if (!previous) return { text: "", steps: null };
+/** Whether two step lists walk the same controls in the same order. */
+function sameRoute(a: readonly Step[], b: readonly Step[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((step, index) => {
+    const other = b[index];
+    if (!step.control || !other?.control) return false;
+    return step.control.route === other.control.route && controlKey(step.control) === controlKey(other.control);
+  });
+}
 
+/**
+ * The remaining steps over the graph: from the page as it is now to the target the answer
+ * resolved to. Null when the plan carried no target or the graph does not connect the pages.
+ */
+async function continueOverGraph(input: ContinueInput, previous: LastAnswer): Promise<ContinueResult | null> {
+  const last = previous.steps?.[previous.steps.length - 1];
+  if (!last?.control) return null;
+  // The page the user is on joins the graph first, so a route can start from it.
+  await recordScan(input.projectId, input.page, "widget").catch(() => undefined);
+  const graph = await loadGraph(input.projectId);
+  const target = { route: last.control.route, key: controlKey(last.control) };
+  const plan = planRoute(graph, currentPageOf(input.page), target);
+  if (!plan) return null;
+  if (plan.steps.length === 0) return { text: previous.content, steps: null, routeChanged: false };
+  const bound = bindFirstStep(plan.steps, input.page);
+  if (!bound) return null;
+  const steps = validatePlan(bound, input.page.affordances, MAX_ROUTE_STEPS);
+  if (!steps) return null;
+  const expected = (previous.steps ?? []).slice(Math.max(input.continueFrom, 0));
+  return { text: previous.content, steps, routeChanged: !sameRoute(expected, steps) };
+}
+
+/** One small model call over the page as it is now, when the graph has no route to offer. */
+async function continueOnPage(input: ContinueInput, previous: LastAnswer): Promise<ContinueResult> {
   const reachableAffordances = visibleAffordances(input.page);
   const grounding = previous.grounding ? JSON.stringify(previous.grounding).slice(0, 4000) : "none";
   const { steps: proposed } = await chatJson<{ steps: Step[] }>(
@@ -115,24 +153,38 @@ export async function continueGuidance(input: ContinueInput): Promise<ContinueRe
   const known = new Set(reachableAffordances.map((affordance) => affordance.id));
   const reachable: Step[] = [];
   for (const step of dropRepeats(proposed ?? [])) {
-    if (!known.has(step.target)) break;
+    if (typeof step.target !== "string" || !known.has(step.target)) break;
     reachable.push(step);
   }
   const steps = validatePlan(reachable, reachableAffordances);
+  return { text: previous.content, steps, routeChanged: true };
+}
+
+export async function continueGuidance(input: ContinueInput): Promise<ContinueResult> {
+  const started = Date.now();
+  const previous = await lastAssistantMessage(input.conversationId);
+  if (!previous) return { text: "", steps: null, routeChanged: false };
+
+  const overGraph = await continueOverGraph(input, previous).catch(() => null);
+  const result = overGraph ?? (await continueOnPage(input, previous));
   const latencyMs = Date.now() - started;
   void emitTrace({
     projectId: input.projectId,
     conversationId: input.conversationId,
-    kind: "model",
-    title: "Continued the walkthrough",
+    kind: overGraph ? "decision" : "model",
+    title: overGraph ? "Re-planned the route over the product map" : "Continued the walkthrough",
     detail: {
-      model: MODELS.plan,
-      purpose: "name the steps that are left now that the page has changed",
-      output_summary: (steps ?? []).map((step) => step.caption).join(" / ") || "nothing left",
+      ...(overGraph ? {} : { model: MODELS.plan }),
+      purpose: overGraph
+        ? "the control the widget expected was not on the page, so the route was recomputed"
+        : "the product map has no route from this page, so the page itself was read",
+      output_summary: (result.steps ?? []).map((step) => step.caption).join(" / ") || "nothing left",
+      routeChanged: result.routeChanged,
+      stepsLeft: result.steps?.length ?? 0,
       latencyMs,
     },
     source: "agent",
   });
 
-  return { text: previous.content, steps };
+  return result;
 }
